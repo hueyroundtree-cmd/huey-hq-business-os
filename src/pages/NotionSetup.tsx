@@ -50,17 +50,18 @@ export default function NotionSetup() {
     load();
   };
 
-  const syncNow = async () => {
+  const runNotion = async (action: "verify" | "sync") => {
     setBusy(true);
-    const { data: u } = await supabase.auth.getUser();
-    const uid = u.user?.id!;
-    // Honest behavior: without a verified backend token, we log a failure — never fake success.
-    const outcome = status === "Connected" ? "skipped" : "failed";
-    const detail = status === "Connected"
-      ? "Sync worker not yet enabled in this release."
-      : "Notion is not connected. Add NOTION_TOKEN as a project secret and complete authorization to enable sync.";
-    await supabase.from("sync_audit").insert({ user_id: uid, provider: "Notion", entity: null, outcome, detail });
-    toast.message("Sync attempt logged", { description: detail });
+    const { data, error } = await supabase.functions.invoke("notion-sync", { body: { action } });
+    if (error || data?.error) {
+      toast.error(action === "verify" ? "Notion verification failed" : "Notion sync failed", {
+        description: data?.error || error?.message || "Review the audit log.",
+      });
+    } else {
+      toast.success(action === "verify" ? "Notion connection verified" : "Notion tasks synced", {
+        description: data?.detail,
+      });
+    }
     setBusy(false);
     load();
   };
@@ -78,7 +79,8 @@ export default function NotionSetup() {
         actions={
           <>
             <ConnectionBadge status={status} lastSync={integration?.last_sync_at} />
-            <Button size="sm" variant="outline" onClick={syncNow} disabled={busy}><RefreshCw className="h-4 w-4 mr-1.5" />Sync Now</Button>
+            <Button size="sm" variant="outline" onClick={() => runNotion("verify")} disabled={busy}>Verify connection</Button>
+            <Button size="sm" variant="outline" onClick={() => runNotion("sync")} disabled={busy}><RefreshCw className="h-4 w-4 mr-1.5" />Sync Tasks</Button>
           </>
         }
       />
@@ -88,10 +90,18 @@ export default function NotionSetup() {
           <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1">
             <li>Create a Notion internal integration and copy the token.</li>
             <li>Add it as <code className="font-mono text-[12px]">NOTION_TOKEN</code> in Project Settings → Secrets.</li>
-            <li>Share your CRM / Revenue / Tasks databases with the integration.</li>
-            <li>Add mappings below with each database's ID.</li>
-            <li>Run Sync Now. Success is only reported after a real Notion API response.</li>
+            <li>Share your Tasks database with the integration.</li>
+            <li>Add a tasks mapping below using the Notion data source ID.</li>
+            <li>Deploy the <code className="font-mono text-[12px]">notion-sync</code> Edge Function.</li>
+            <li>Verify the connection, then sync tasks. Success is reported only after real Notion API responses.</li>
           </ol>
+        </div>
+
+        <div className="surface border-gold/40 bg-gold/10 p-4 text-sm">
+          <div className="font-medium">Current sync scope: tasks only</div>
+          <p className="mt-1 text-muted-foreground">
+            The Notion tasks data source must include a title property and a rich-text property named <code className="font-mono">Huey HQ ID</code>. Huey's existing <code className="font-mono">Status</code> and <code className="font-mono">Due Date</code> properties are synchronized when present. Other entity mappings are logged as skipped.
+          </p>
         </div>
 
         <div className="surface p-4">
@@ -101,7 +111,7 @@ export default function NotionSetup() {
               <SelectTrigger className="sm:w-48"><SelectValue /></SelectTrigger>
               <SelectContent>{ENTITIES.map(e => <SelectItem key={e} value={e}>{e}</SelectItem>)}</SelectContent>
             </Select>
-            <Input placeholder="Notion database ID" value={form.target_ref} onChange={(e) => setForm({ ...form, target_ref: e.target.value })} className="flex-1" />
+            <Input placeholder="Notion data source ID" value={form.target_ref} onChange={(e) => setForm({ ...form, target_ref: e.target.value })} className="flex-1" />
             <Button onClick={addMapping} size="sm"><Plus className="h-4 w-4 mr-1.5" />Save mapping</Button>
           </div>
           {mappings.length === 0 ? (

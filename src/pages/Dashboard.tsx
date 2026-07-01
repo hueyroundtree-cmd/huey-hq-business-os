@@ -81,6 +81,8 @@ export default function Dashboard() {
   }, [params]);
 
   const bankConnected = useMemo(() => integrations.some(i => ["Square", "Shopify", "Stan Store"].includes(i.provider) && i.status === "Connected"), [integrations]);
+  const notion = useMemo(() => integrations.find(i => i.provider === "Notion"), [integrations]);
+  const notionStatus = (notion?.status ?? "Not Connected") as "Connected" | "Not Connected" | "Error";
 
   const recs = useMemo(() => {
     const list: { title: string; detail: string; to: string }[] = [];
@@ -105,6 +107,27 @@ export default function Dashboard() {
       />
 
       <div className="p-4 md:p-6 space-y-6">
+        <section className={`surface p-4 border-l-4 ${notionStatus === "Connected" ? "border-l-forest" : notionStatus === "Error" ? "border-l-destructive" : "border-l-gold"}`}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="font-display font-semibold text-sm">Notion sync status</h2>
+                <ConnectionBadge status={notionStatus} lastSync={notion?.last_sync_at} />
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {notionStatus === "Connected"
+                  ? "Notion is connected. Sync claims still require a verified API response and audit record."
+                  : notionStatus === "Error"
+                    ? "Notion connection needs attention. Open setup to review the latest error."
+                    : "Notion not connected yet. Huey HQ is currently using its own secure database."}
+              </p>
+            </div>
+            <Button asChild size="sm" variant={notionStatus === "Connected" ? "outline" : "default"} className="shrink-0">
+              <Link to="/integrations/notion">{notionStatus === "Connected" ? "Manage Notion" : "Configure Notion"}</Link>
+            </Button>
+          </div>
+        </section>
+
         {/* Metrics */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <Stat label="Cash on hand" value={cash === null ? "—" : money(cash)} hint={bankConnected ? "" : "Verify in Start My Day"} icon={DollarSign} accent />

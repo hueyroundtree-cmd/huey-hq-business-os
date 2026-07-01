@@ -13,9 +13,76 @@ import { toast } from "sonner";
 
 type Script = { id: string; user_id: string | null; is_template: boolean; category: string; title: string; body: string; placeholders: string[] };
 
+const FALLBACK_SCRIPTS: Script[] = [
+  {
+    id: "fallback-dealership",
+    user_id: null,
+    is_template: true,
+    category: "Dealership Outreach",
+    title: "Dealership Cold Outreach",
+    body: "Hi {{contact_name}}, this is {{sender_name}} with Great Freight Detailing. We help dealerships like {{business_name}} keep inventory showroom-ready. Do you have five minutes this week to discuss a recon partnership?",
+    placeholders: ["contact_name", "sender_name", "business_name"],
+  },
+  {
+    id: "fallback-fleet",
+    user_id: null,
+    is_template: true,
+    category: "Fleet Outreach",
+    title: "Fleet Detailing Pitch",
+    body: "Hi {{contact_name}}, I run Great Freight Detailing. We provide on-site fleet washes and interior details so your vehicles stay in service. Would a quick quote for {{business_name}}'s fleet be useful?",
+    placeholders: ["contact_name", "business_name"],
+  },
+  {
+    id: "fallback-seller",
+    user_id: null,
+    is_template: true,
+    category: "Individual Seller DM",
+    title: "Marketplace Seller DM",
+    body: "Hey {{customer_name}}, I saw your {{vehicle}} listed. A professional detail can improve the listing photos and buyer impression. I can come to you for {{price}}. Would you like an available time?",
+    placeholders: ["customer_name", "vehicle", "price"],
+  },
+  {
+    id: "fallback-booking",
+    user_id: null,
+    is_template: true,
+    category: "Booking Confirmation",
+    title: "Booking Confirmation",
+    body: "Hi {{customer_name}}, confirming your {{service}} on {{date}} at {{time}} for your {{vehicle}}. Total: {{price}}. Booking details: {{booking_link}}. Reply CONFIRM to lock it in.",
+    placeholders: ["customer_name", "service", "date", "time", "vehicle", "price", "booking_link"],
+  },
+  {
+    id: "fallback-follow-up",
+    user_id: null,
+    is_template: true,
+    category: "Follow-Up",
+    title: "Quote Follow-Up",
+    body: "Hi {{customer_name}}, I am following up on the {{service}} quote for your {{vehicle}}. Would you like me to hold {{date}} for you? Booking link: {{booking_link}}",
+    placeholders: ["customer_name", "service", "vehicle", "date", "booking_link"],
+  },
+  {
+    id: "fallback-review",
+    user_id: null,
+    is_template: true,
+    category: "Review Request",
+    title: "Post-Service Review Request",
+    body: "Thank you for choosing Great Freight Detailing, {{customer_name}}. If you were satisfied with the {{service}} on your {{vehicle}}, please leave a review here: {{booking_link}}",
+    placeholders: ["customer_name", "service", "vehicle", "booking_link"],
+  },
+  {
+    id: "fallback-referral",
+    user_id: null,
+    is_template: true,
+    category: "Referral Pitch",
+    title: "Referral Ask",
+    body: "Thank you, {{customer_name}}. If you know someone who needs {{service}}, send them my booking link: {{booking_link}}. I will apply {{price}} off your next service as a thank-you.",
+    placeholders: ["customer_name", "service", "booking_link", "price"],
+  },
+];
+
 export default function Scripts() {
   const [scripts, setScripts] = useState<Script[]>([]);
   const [loading, setLoading] = useState(true);
+  const [usingFallback, setUsingFallback] = useState(false);
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string>("all");
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -26,8 +93,11 @@ export default function Scripts() {
 
   const load = async () => {
     setLoading(true);
-    const { data } = await supabase.from("scripts").select("*").order("is_template", { ascending: false }).order("category");
-    setScripts((data as Script[]) ?? []);
+    const { data, error } = await supabase.from("scripts").select("*").order("is_template", { ascending: false }).order("category");
+    const saved = (data as Script[] | null) ?? [];
+    const hasTemplates = saved.some((script) => script.is_template);
+    setUsingFallback(!!error || !hasTemplates);
+    setScripts(hasTemplates ? saved : [...FALLBACK_SCRIPTS, ...saved]);
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
@@ -65,7 +135,7 @@ export default function Scripts() {
       user_id: uid, is_template: false, category: s.category,
       title: `${s.title} (my copy)`, body: s.body, placeholders: s.placeholders,
     });
-    if (error) return toast.error(error.message);
+    if (error) return toast.error(`Could not save this copy: ${error.message}`);
     toast.success("Copied to your library");
     load();
   };
@@ -100,6 +170,11 @@ export default function Scripts() {
         actions={<Button size="sm" onClick={() => { setEditing({ title: "", body: "", category: "Custom", placeholders: [] }); setEditOpen(true); }}><Plus className="h-4 w-4 mr-1.5" />New Script</Button>}
       />
       <div className="p-4 md:p-6 space-y-4">
+        {usingFallback && (
+          <div className="surface border-gold/40 bg-gold/10 p-3 text-sm text-foreground">
+            Showing built-in Great Freight templates. Your database templates are unavailable, but these scripts remain usable and copyable.
+          </div>
+        )}
         <div className="flex flex-col sm:flex-row gap-2">
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search scripts…" className="flex-1" />
           <Select value={cat} onValueChange={setCat}>
@@ -116,7 +191,7 @@ export default function Scripts() {
           : (
             <div className="grid md:grid-cols-2 gap-3">
               {filtered.map(s => (
-                <div key={s.id} className="surface p-4 flex flex-col gap-2">
+                <div key={s.id} className="surface script-card p-4 flex flex-col gap-2">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="text-xs text-muted-foreground uppercase tracking-wide">{s.category}</div>
@@ -126,7 +201,7 @@ export default function Scripts() {
                       ? <span className="text-[10px] rounded-sm bg-gold/20 text-gold-foreground/80 border border-gold/30 px-1.5 py-0.5 font-medium">TEMPLATE</span>
                       : <span className="text-[10px] rounded-sm bg-muted text-muted-foreground px-1.5 py-0.5 font-medium">MY COPY</span>}
                   </div>
-                  <p className="text-xs text-muted-foreground line-clamp-3 whitespace-pre-wrap">{s.body}</p>
+                  <p className="text-sm text-foreground/80 line-clamp-4 whitespace-pre-wrap">{s.body}</p>
                   <div className="flex items-center gap-1.5 mt-1">
                     <Button size="sm" variant="outline" onClick={() => openPreview(s)}><Copy className="h-3.5 w-3.5 mr-1" />Fill & copy</Button>
                     {s.is_template ? (

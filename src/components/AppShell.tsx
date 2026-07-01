@@ -124,8 +124,8 @@ export default function AppShell() {
           <div className="ml-auto flex items-center gap-1.5">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button size="sm" className="gap-1.5 bg-foreground text-background hover:bg-foreground/90">
-                  <PlusCircle className="h-4 w-4" /> Quick action
+                <Button size="sm" className="gap-1.5 bg-foreground text-background hover:bg-foreground/90" aria-label="Quick action">
+                  <PlusCircle className="h-4 w-4" /><span className="hidden min-[360px]:inline">Quick action</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
@@ -148,7 +148,7 @@ export default function AppShell() {
 
         {/* Mobile bottom nav */}
         <nav className="fixed bottom-0 inset-x-0 z-30 md:hidden border-t bg-background/95 backdrop-blur">
-          <div className="grid grid-cols-5">
+          <div className="grid grid-cols-5 pb-[env(safe-area-inset-bottom)]">
             {MOBILE_NAV.map((n) => (
               <NavLink
                 key={n.to}
