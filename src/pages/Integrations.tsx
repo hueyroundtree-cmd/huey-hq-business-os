@@ -123,7 +123,7 @@ export default function Integrations() {
             )}
             <div><Label className="text-xs">Notes for this integration</Label><Textarea rows={2} value={detail.notes} onChange={(e) => setDetail({ ...detail, notes: e.target.value })} /></div>
             <div className="text-[11px] text-muted-foreground border-l-2 border-border pl-2">
-              Secret token setup: add <code className="font-mono">{open?.toUpperCase().replaceAll(" ", "_")}_TOKEN</code> in Project Settings → Secrets. Status flips to Connected only after a live API response.
+              Secret token setup: add <code className="font-mono">{open?.toUpperCase().split(" ").join("_")}_TOKEN</code> in Project Settings → Secrets. Status flips to Connected only after a live API response.
             </div>
           </div>
           <DialogFooter>

@@ -151,7 +151,7 @@ export default function Scripts() {
             <div className="grid grid-cols-2 gap-2">
               {current.placeholders.map(p => (
                 <div key={p}>
-                  <Label className="text-xs">{p.split("_", " ")}</Label>
+                  <Label className="text-xs">{p.split("_").join(" ")}</Label>
                   <Input value={vals[p] ?? ""} onChange={(e) => setVals({ ...vals, [p]: e.target.value })} />
                 </div>
               ))}
