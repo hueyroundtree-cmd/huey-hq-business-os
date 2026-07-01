@@ -48,6 +48,7 @@ const App = () => (
               <Route path="/roadmap" element={<Roadmap />} />
               <Route path="/integrations" element={<Integrations />} />
               <Route path="/integrations/notion" element={<NotionSetup />} />
+              <Route path="/integrations/notion/:entity" element={<NotionSetup />} />
               <Route path="/settings" element={<Settings />} />
             </Route>
             <Route path="*" element={<NotFound />} />
