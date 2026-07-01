@@ -100,7 +100,7 @@ export default function NotionSetup() {
         <div className="surface border-gold/40 bg-gold/10 p-4 text-sm">
           <div className="font-medium">Current sync scope: tasks only</div>
           <p className="mt-1 text-muted-foreground">
-            The Notion tasks data source must include a title property and a rich-text property named <code className="font-mono">Huey HQ ID</code>. Optional <code className="font-mono">Done</code> checkbox and <code className="font-mono">Date</code> date properties are synchronized when present. Other entity mappings are logged as skipped.
+            The Notion tasks data source must include a title property and a rich-text property named <code className="font-mono">Huey HQ ID</code>. Huey's existing <code className="font-mono">Status</code> and <code className="font-mono">Due Date</code> properties are synchronized when present. Other entity mappings are logged as skipped.
           </p>
         </div>
 

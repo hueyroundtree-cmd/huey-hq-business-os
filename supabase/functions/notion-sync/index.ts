@@ -114,8 +114,8 @@ Deno.serve(async (request) => {
       fieldMap.title ||
       Object.entries(properties).find(([, value]: [string, any]) => value?.type === "title")?.[0];
     const externalIdProperty = fieldMap.external_id || "Huey HQ ID";
-    const doneProperty = fieldMap.done || "Done";
-    const dateProperty = fieldMap.for_date || "Date";
+    const doneProperty = fieldMap.done || fieldMap.status || "Status";
+    const dateProperty = fieldMap.for_date || "Due Date";
 
     if (!titleProperty) throw new Error("The mapped Notion database has no title property.");
     if (properties[externalIdProperty]?.type !== "rich_text") {
@@ -142,7 +142,13 @@ Deno.serve(async (request) => {
         [titleProperty]: { title: text(task.title) },
         [externalIdProperty]: { rich_text: text(task.id) },
       };
-      if (properties[doneProperty]?.type === "checkbox") notionProperties[doneProperty] = { checkbox: task.done };
+      if (properties[doneProperty]?.type === "checkbox") {
+        notionProperties[doneProperty] = { checkbox: task.done };
+      } else if (properties[doneProperty]?.type === "select") {
+        notionProperties[doneProperty] = { select: { name: task.done ? "Done" : "To Do" } };
+      } else if (properties[doneProperty]?.type === "status") {
+        notionProperties[doneProperty] = { status: { name: task.done ? "Done" : "To Do" } };
+      }
       if (properties[dateProperty]?.type === "date") notionProperties[dateProperty] = { date: { start: task.for_date } };
 
       const existing = query?.results?.[0];
