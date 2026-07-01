@@ -49,7 +49,7 @@ export default function Scripts() {
   const rendered = useMemo(() => {
     if (!current) return "";
     let out = current.body;
-    Object.entries(vals).forEach(([k, v]) => { out = out.replaceAll(`{{${k}}}`, v || `{{${k}}}`); });
+    Object.entries(vals).forEach(([k, v]) => { out = out.split(`{{${k}}}`).join(v || `{{${k}}}`); });
     return out;
   }, [current, vals]);
 
@@ -151,7 +151,7 @@ export default function Scripts() {
             <div className="grid grid-cols-2 gap-2">
               {current.placeholders.map(p => (
                 <div key={p}>
-                  <Label className="text-xs">{p.replaceAll("_", " ")}</Label>
+                  <Label className="text-xs">{p.split("_", " ")}</Label>
                   <Input value={vals[p] ?? ""} onChange={(e) => setVals({ ...vals, [p]: e.target.value })} />
                 </div>
               ))}
