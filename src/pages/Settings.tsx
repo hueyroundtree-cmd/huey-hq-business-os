@@ -6,7 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Download, Trash2 } from "lucide-react";
+import { Download, ExternalLink, Server, Trash2 } from "lucide-react";
+
+const PRODUCTION_URL = "https://hueyroundtree-cmd.github.io/huey-hq-business-os/";
+const SUPABASE_PROJECT_ID = "mqmskpdduwbiypepzkvc";
 
 export default function Settings() {
   const { user, signOut } = useAuth();
@@ -31,7 +34,7 @@ export default function Settings() {
   };
 
   const exportData = async () => {
-    const tables = ["leads","revenue_entries","daily_checkins","tasks","scripts","content_items","automations","integrations","sync_mappings","sync_audit","knowledge_docs","bills","jobs","lead_activities"];
+    const tables = ["leads","revenue_entries","daily_checkins","tasks","scripts","content_items","business_projects","ai_commands","automations","integrations","sync_mappings","sync_audit","knowledge_docs","bills","jobs","lead_activities"];
     const bundle: Record<string, any> = {};
     for (const t of tables) {
       const { data } = await supabase.from(t as any).select("*");
@@ -59,6 +62,28 @@ export default function Settings() {
           <div><Label className="text-xs">Display name</Label><Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></div>
           <div><Label className="text-xs">Business name</Label><Input value={business} onChange={(e) => setBusiness(e.target.value)} /></div>
           <Button size="sm" onClick={saveProfile} disabled={busy}>{busy ? "Saving…" : "Save profile"}</Button>
+        </div>
+
+        <div className="surface p-4 space-y-3">
+          <h3 className="font-medium text-sm flex items-center gap-2"><Server className="h-4 w-4" />Production environment</h3>
+          <dl className="grid gap-3 text-xs">
+            <div>
+              <dt className="text-muted-foreground">Production app</dt>
+              <dd>
+                <a className="inline-flex items-center gap-1 font-medium underline underline-offset-2" href={PRODUCTION_URL} target="_blank" rel="noreferrer">
+                  GitHub Pages <ExternalLink className="h-3 w-3" />
+                </a>
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Backend</dt>
+              <dd className="font-mono break-all">Owned Supabase project {SUPABASE_PROJECT_ID}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Lovable</dt>
+              <dd>Design and prototyping only. Not production hosting.</dd>
+            </div>
+          </dl>
         </div>
 
         <div className="surface p-4 space-y-3">

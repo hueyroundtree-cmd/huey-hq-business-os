@@ -146,6 +146,12 @@ export default function AppShell() {
           <Outlet />
         </main>
 
+        <footer className="hidden md:flex items-center justify-between gap-4 border-t px-5 py-3 text-[11px] text-muted-foreground">
+          <span>Production: GitHub Pages</span>
+          <span>Backend: Supabase mqmskpdduwbiypepzkvc</span>
+          <span>Lovable: prototyping only</span>
+        </footer>
+
         {/* Mobile bottom nav */}
         <nav className="fixed bottom-0 inset-x-0 z-30 md:hidden border-t bg-background/95 backdrop-blur">
           <div className="grid grid-cols-5 pb-[env(safe-area-inset-bottom)]">
