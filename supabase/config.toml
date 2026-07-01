@@ -1,4 +1,4 @@
-project_id = "czejhviquvxqwepleing"
+project_id = "mqmskpdduwbiypepzkvc"
 
 [functions.notion-sync]
-verify_jwt = true
+verify_jwt = false
