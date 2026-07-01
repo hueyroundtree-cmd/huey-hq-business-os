@@ -12,7 +12,7 @@ import { Link } from "react-router-dom";
 import { AlertTriangle } from "lucide-react";
 
 const PROVIDERS: { key: string; blurb: string; docs: string[] }[] = [
-  { key: "Notion", blurb: "Two-way sync for CRM, revenue, check-ins, tasks, and scripts.", docs: ["Reads: pages & databases you share.", "Writes: mapped rows in your Notion database."] },
+  { key: "Notion", blurb: "Verified sync for ten Huey HQ operating areas.", docs: ["Reads: only data sources you share.", "Writes: duplicate-safe rows using Huey HQ ID."] },
   { key: "Google Drive", blurb: "Attach receipts, thumbnails, SOPs from Drive.", docs: ["Read files/folders you allow.", "Write only when you upload from Huey."] },
   { key: "Google Calendar", blurb: "Push jobs and bookings to your calendar.", docs: ["Read events on selected calendars.", "Write jobs as events."] },
   { key: "Gmail", blurb: "Send follow-ups via Gmail from your account.", docs: ["Read: none.", "Write: send drafts you approve."] },
@@ -99,7 +99,7 @@ export default function Integrations() {
                 </ul>
                 <div className="mt-3 flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => openSetup(p.key)}>Configure</Button>
-                  {p.key === "Notion" && <Link to="/integrations/notion" className="text-xs underline underline-offset-2 self-center">Notion setup →</Link>}
+                  {p.key === "Notion" && <Link to="/integrations/notion" className="text-xs underline underline-offset-2 self-center">Manage Notion connections</Link>}
                 </div>
                 {rec?.last_error && <div className="mt-2 text-[11px] text-destructive">Last error: {rec.last_error}</div>}
               </div>
