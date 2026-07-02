@@ -444,7 +444,8 @@ Deno.serve(async (request) => {
         updated,
         skipped: skippedFields,
         failed,
-        error: detail,
+        error: recordErrors[0]?.error ?? detail,
+        detail,
         record_errors: recordErrors,
       });
     }
