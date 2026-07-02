@@ -152,7 +152,7 @@ const DEFINITIONS: Record<string, EntityDefinition> = {
     select: "id,check_date,kind,cash_on_hand,summary_json,notes,created_at",
     orderBy: "created_at",
     titleSource: "check_in",
-    title: (row) => `${row.kind === "morning" ? "Start My Day" : "End My Day"} - ${row.check_date}`,
+    title: (row) => `${row.kind === "morning" ? "Start My Day" : row.kind === "plan" ? "Daily Plan" : "End My Day"} - ${row.check_date}`,
     fields: [
       { source: "check_date", notion: "Date", kind: "date" },
       { source: "kind", notion: "Check-In", kind: "select" },

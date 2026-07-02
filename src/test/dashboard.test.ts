@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getNotionHealth, type NotionMappingHealth } from "@/lib/dashboard";
+import { getDailyDriverScore, getNotionHealth, type NotionMappingHealth } from "@/lib/dashboard";
 import { NOTION_ENTITIES } from "@/lib/notionEntities";
 
 const mapping = (
@@ -35,5 +35,19 @@ describe("CEO Dashboard Notion health", () => {
   it("surfaces a mapping error above partial connection state", () => {
     const mappings = [mapping("tasks", { status: "Error", last_error: "Unauthorized" })];
     expect(getNotionHealth(mappings).status).toBe("Error");
+  });
+});
+
+describe("Daily Driver scorecard", () => {
+  it("scores three top tasks and five action lanes", () => {
+    expect(getDailyDriverScore(
+      [true, true, false],
+      [true, true, true, false, false],
+    )).toEqual({ done: 5, possible: 8, percent: 63 });
+  });
+
+  it("keeps three priority slots in the denominator before priorities are entered", () => {
+    expect(getDailyDriverScore([], [true, false, false, false, false]))
+      .toEqual({ done: 1, possible: 8, percent: 13 });
   });
 });
