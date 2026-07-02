@@ -415,6 +415,8 @@ export type Database = {
           next_follow_up_at: string | null
           notes: string | null
           phone: string | null
+          estimated_value: number | null
+          lead_type: string
           quote_amount: number | null
           service_needed: string | null
           source: string | null
@@ -434,6 +436,8 @@ export type Database = {
           next_follow_up_at?: string | null
           notes?: string | null
           phone?: string | null
+          estimated_value?: number | null
+          lead_type?: string
           quote_amount?: number | null
           service_needed?: string | null
           source?: string | null
@@ -453,6 +457,8 @@ export type Database = {
           next_follow_up_at?: string | null
           notes?: string | null
           phone?: string | null
+          estimated_value?: number | null
+          lead_type?: string
           quote_amount?: number | null
           service_needed?: string | null
           source?: string | null
@@ -745,10 +751,12 @@ export type Database = {
       lead_status:
         | "New Lead"
         | "Contacted"
-        | "Quote Sent"
+        | "Quoted"
         | "Booked"
         | "Completed"
         | "Review Requested"
+        | "Closed/Lost"
+        | "Quote Sent"
         | "Lost"
         | "Follow-Up Needed"
     }
@@ -903,10 +911,12 @@ export const Constants = {
       lead_status: [
         "New Lead",
         "Contacted",
-        "Quote Sent",
+        "Quoted",
         "Booked",
         "Completed",
         "Review Requested",
+        "Closed/Lost",
+        "Quote Sent",
         "Lost",
         "Follow-Up Needed",
       ],

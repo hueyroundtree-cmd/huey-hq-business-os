@@ -62,7 +62,7 @@ const DEFINITIONS: Record<string, EntityDefinition> = {
   },
   leads: {
     table: "leads",
-    select: "id,name,business,phone,email,source,service_needed,status,quote_amount,deposit,booking_at,last_contact_at,next_follow_up_at,notes,updated_at",
+    select: "id,name,business,phone,email,source,lead_type,service_needed,status,estimated_value,deposit,booking_at,last_contact_at,next_follow_up_at,notes,updated_at",
     titleSource: "name",
     title: (row) => row.name,
     fields: [
@@ -70,9 +70,10 @@ const DEFINITIONS: Record<string, EntityDefinition> = {
       { source: "phone", notion: "Phone", kind: "phone" },
       { source: "email", notion: "Email", kind: "email" },
       { source: "source", notion: "Source", kind: "select" },
+      { source: "lead_type", notion: "Lead Type", kind: "select" },
       { source: "service_needed", notion: "Service Needed" },
       { source: "status", notion: "Status", kind: "select" },
-      { source: "quote_amount", notion: "Quote Amount", kind: "number" },
+      { source: "estimated_value", notion: "Quote Amount", kind: "number" },
       { source: "deposit", notion: "Deposit", kind: "number" },
       { source: "booking_at", notion: "Booking Date", kind: "date" },
       { source: "last_contact_at", notion: "Last Contact", kind: "date" },
