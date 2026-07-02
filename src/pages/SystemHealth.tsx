@@ -71,6 +71,7 @@ export default function SystemHealth() {
     const integrations = integrationResult.data ?? [];
     const mappings = mappingResult.data ?? [];
     const notion = integrations.find((item) => item.provider === "Notion");
+    const claude = integrations.find((item) => item.provider === "Claude AI");
     const notionError = integrationResult.error?.message ?? mappingResult.error?.message ?? notion?.last_error ?? null;
     const notionVerifiedAt = latestTimestamp([
       notion?.last_sync_at,
@@ -141,6 +142,19 @@ export default function SystemHealth() {
         lastVerified: notionVerifiedAt,
         latestError: notionError,
       },
+      {
+        name: "Claude AI",
+        status: stateFromEvidence({
+          succeeded: Boolean(claude?.last_sync_at),
+          verifiedAt: claude?.last_sync_at,
+          error: claude?.last_error,
+        }),
+        detail: claude?.last_sync_at
+          ? "Supabase Edge Function received a successful Claude API response"
+          : "Run one successful Ask Claude request to verify the full connection",
+        lastVerified: claude?.last_sync_at,
+        latestError: claude?.last_error,
+      },
       mappingHealth("leads", "CRM sync"),
       mappingHealth("daily_checkins", "Daily Driver sync"),
       {
@@ -204,7 +218,7 @@ export default function SystemHealth() {
             <h2 className="font-display font-semibold">Core verification</h2>
           </div>
           <div className="divide-y">
-            {items.slice(0, 9).map((item) => <HealthRow key={item.name} item={item} />)}
+            {items.slice(0, 10).map((item) => <HealthRow key={item.name} item={item} />)}
           </div>
         </section>
 
@@ -213,7 +227,7 @@ export default function SystemHealth() {
             <h2 className="font-display font-semibold">External integrations</h2>
           </div>
           <div className="grid md:grid-cols-2">
-            {items.slice(9).map((item) => <HealthRow key={item.name} item={item} />)}
+            {items.slice(10).map((item) => <HealthRow key={item.name} item={item} />)}
           </div>
         </section>
       </div>
