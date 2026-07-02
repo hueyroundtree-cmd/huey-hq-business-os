@@ -348,10 +348,15 @@ Deno.serve(async (request) => {
 
     let sourceQuery = supabase
       .from(definition.table)
-      .select(definition.select)
-      .order(definition.orderBy || "updated_at", { ascending: true });
+      .select(definition.select);
     if (definition.filter) sourceQuery = sourceQuery.eq(definition.filter.column, definition.filter.value);
-    if (recordId) sourceQuery = sourceQuery.eq("id", recordId);
+    if (recordId) {
+      sourceQuery = sourceQuery.eq("id", recordId);
+    } else if (action === "sync" && entity === "daily_checkins") {
+      sourceQuery = sourceQuery.eq("kind", "plan").order("created_at", { ascending: false }).limit(1);
+    } else {
+      sourceQuery = sourceQuery.order(definition.orderBy || "updated_at", { ascending: true });
+    }
     const { data: rows, error: sourceError } = await sourceQuery;
     if (sourceError) throw sourceError;
 
