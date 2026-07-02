@@ -22,6 +22,12 @@ import Integrations from "./pages/Integrations";
 import NotionSetup from "./pages/NotionSetup";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import BusinessSystems from "./pages/BusinessSystems";
+import ModuleStore from "./pages/ModuleStore";
+import Outreach from "./pages/Outreach";
+import OperationsTimeline from "./pages/OperationsTimeline";
+import SystemHealth from "./pages/SystemHealth";
+import CommandSearch from "./pages/CommandSearch";
 
 const queryClient = new QueryClient();
 
@@ -39,6 +45,13 @@ const App = () => (
             <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/crm" element={<CRM />} />
+              <Route path="/systems" element={<BusinessSystems />} />
+              <Route path="/command-center" element={<BusinessSystems />} />
+              <Route path="/module-store" element={<ModuleStore />} />
+              <Route path="/outreach" element={<Outreach />} />
+              <Route path="/timeline" element={<OperationsTimeline />} />
+              <Route path="/health" element={<SystemHealth />} />
+              <Route path="/search" element={<CommandSearch />} />
               <Route path="/revenue" element={<Revenue />} />
               <Route path="/content" element={<Content />} />
               <Route path="/scripts" element={<Scripts />} />

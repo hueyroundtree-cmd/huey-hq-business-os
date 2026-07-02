@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { money, moneyExact, todayISO, startOfWeekISO, startOfMonthISO } from "@/lib/format";
 import { useSearchParams } from "react-router-dom";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from "recharts";
+import { emitOperationEvent } from "@/lib/eventEngine";
 
 const STREAMS = ["Detailing","Logistics","Shopify","Stan Store","Gig Work","Content","Investing","Other"] as const;
 
@@ -65,7 +66,7 @@ export default function Revenue() {
     if (!form.amount) return toast.error("Amount is required");
     const { data: u } = await supabase.auth.getUser();
     const uid = u.user?.id!;
-    const { error } = await supabase.from("revenue_entries").insert({
+    const { data: saved, error } = await supabase.from("revenue_entries").insert({
       user_id: uid,
       entry_date: form.entry_date,
       stream: form.stream,
@@ -73,8 +74,19 @@ export default function Revenue() {
       payment_method: form.payment_method || null,
       proof_url: form.proof_url || null,
       notes: form.notes || null,
-    });
+    }).select("*").single();
     if (error) return toast.error(error.message);
+    const event = await emitOperationEvent({
+      userId: uid,
+      eventType: "payment_received",
+      entityType: "revenue",
+      entityId: saved.id,
+      title: "Payment received",
+      detail: `${moneyExact(Number(saved.amount))} logged for ${saved.stream}.`,
+      source: "Revenue Center",
+      metadata: { stream: saved.stream, proof_url: saved.proof_url },
+    });
+    if (event.error) toast.warning(`Revenue saved; timeline needs attention: ${event.error.message}`);
     toast.success("Revenue logged");
     setOpen(false);
     setForm({ entry_date: todayISO(), stream: "Detailing", amount: "", payment_method: "", proof_url: "", notes: "" });

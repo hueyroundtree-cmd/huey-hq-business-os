@@ -16,6 +16,7 @@ import {
   LEAD_STATUSES, LEAD_TYPES, getOpenPipelineValue, isOpenLead,
   type LeadStatus, type LeadType,
 } from "@/lib/crmPipeline";
+import { emitOperationEvent } from "@/lib/eventEngine";
 
 type Lead = {
   id: string;
@@ -92,11 +93,73 @@ export default function CRM() {
     for (const key of ["booking_at", "next_follow_up_at", "last_contact_at"]) {
       if (payload[key] === "") payload[key] = null;
     }
+    const isNew = !editing.id;
+    if (isNew && !payload.next_follow_up_at) {
+      const followUp = new Date();
+      followUp.setDate(followUp.getDate() + 2);
+      followUp.setHours(9, 0, 0, 0);
+      payload.next_follow_up_at = followUp.toISOString();
+    }
+    const previous = editing.id ? leads.find((lead) => lead.id === editing.id) : null;
     const result = editing.id
-      ? await supabase.from("leads").update(payload).eq("id", editing.id)
-      : await supabase.from("leads").insert(payload);
+      ? await supabase.from("leads").update(payload).eq("id", editing.id).select("*").single()
+      : await supabase.from("leads").insert(payload).select("*").single();
     if (result.error) return toast.error(result.error.message);
-    toast.success("Lead saved");
+    const saved = result.data as Lead;
+
+    if (isNew) {
+      const followDate = saved.next_follow_up_at?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
+      const setup = await Promise.all([
+        supabase.from("lead_activities").insert({
+          user_id: auth.user.id,
+          lead_id: saved.id,
+          kind: "Lead added",
+          detail: `${saved.source ?? "Direct"} lead added to the shared CRM`,
+        }),
+        supabase.from("tasks").insert({
+          user_id: auth.user.id,
+          title: `Follow up with ${saved.name}`,
+          for_date: followDate,
+          proof_note: `Auto-created from lead ${saved.id}`,
+        }),
+        emitOperationEvent({
+          userId: auth.user.id,
+          eventType: "lead_added",
+          entityType: "lead",
+          entityId: saved.id,
+          title: "Lead added",
+          detail: `${saved.name} entered the CRM from ${saved.source ?? "an unspecified source"}.`,
+          source: "CRM",
+        }),
+      ]);
+      const setupError = setup.find((response) => response.error)?.error;
+      if (setupError) {
+        toast.warning(`Lead saved; automation needs attention: ${setupError.message}`);
+      } else {
+        toast.success("Lead saved and follow-up workflow created");
+      }
+    } else {
+      if (previous?.status !== saved.status) {
+        await Promise.all([
+          supabase.from("lead_activities").insert({
+            user_id: auth.user.id,
+            lead_id: saved.id,
+            kind: saved.status,
+            detail: `Status changed from ${previous?.status ?? "Unknown"} to ${saved.status}`,
+          }),
+          emitOperationEvent({
+            userId: auth.user.id,
+            eventType: saved.status.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+            entityType: "lead",
+            entityId: saved.id,
+            title: saved.status,
+            detail: `${saved.name} moved from ${previous?.status ?? "Unknown"} to ${saved.status}.`,
+            source: "CRM",
+          }),
+        ]);
+      }
+      toast.success("Lead saved");
+    }
     setEditOpen(false);
     setEditing(emptyLead);
     load();

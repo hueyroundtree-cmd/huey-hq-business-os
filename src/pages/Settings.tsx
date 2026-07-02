@@ -34,7 +34,7 @@ export default function Settings() {
   };
 
   const exportData = async () => {
-    const tables = ["leads","revenue_entries","daily_checkins","tasks","scripts","content_items","business_projects","ai_commands","automations","integrations","sync_mappings","sync_audit","knowledge_docs","bills","jobs","lead_activities"];
+    const tables = ["leads","revenue_entries","daily_checkins","tasks","scripts","content_items","business_projects","ai_commands","automations","integrations","sync_mappings","sync_audit","knowledge_docs","bills","jobs","lead_activities","operations_events"];
     const bundle: Record<string, any> = {};
     for (const t of tables) {
       const { data } = await supabase.from(t as any).select("*");
