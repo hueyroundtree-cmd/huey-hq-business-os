@@ -12,6 +12,7 @@ import { Users, Plus, Phone, Mail, AlertCircle, Search } from "lucide-react";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
 import { money } from "@/lib/format";
+import { emitOperationEvent } from "@/lib/eventEngine";
 
 const STATUSES = ["New Lead","Contacted","Quote Sent","Booked","Completed","Review Requested","Lost","Follow-Up Needed"] as const;
 type Status = typeof STATUSES[number];
@@ -67,11 +68,98 @@ export default function CRM() {
     for (const k of ["quote_amount","deposit"] as const) if (payload[k] === "" || payload[k] === undefined) payload[k] = null;
     for (const k of ["booking_at","next_follow_up_at","last_contact_at"] as const) if (payload[k] === "") payload[k] = null;
 
+    const isNew = !editing.id;
+    if (isNew && !payload.next_follow_up_at) {
+      const followUp = new Date();
+      followUp.setDate(followUp.getDate() + 2);
+      followUp.setHours(9, 0, 0, 0);
+      payload.next_follow_up_at = followUp.toISOString();
+    }
+
+    const previous = editing.id ? leads.find((lead) => lead.id === editing.id) : null;
     const res = editing.id
-      ? await supabase.from("leads").update(payload).eq("id", editing.id)
-      : await supabase.from("leads").insert(payload);
+      ? await supabase.from("leads").update(payload).eq("id", editing.id).select("*").single()
+      : await supabase.from("leads").insert(payload).select("*").single();
     if (res.error) return toast.error(res.error.message);
-    toast.success("Lead saved");
+    const saved = res.data as Lead;
+
+    if (isNew) {
+      const followDate = saved.next_follow_up_at?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
+      const { data: zoho } = await supabase.from("integrations").select("status").eq("provider", "Zoho Mail").maybeSingle();
+      const zohoConnected = zoho?.status === "Connected";
+
+      const results = await Promise.all([
+        supabase.from("lead_activities").insert({
+          user_id: uid,
+          lead_id: saved.id,
+          kind: "Lead added",
+          detail: `${saved.source ?? "Direct"} lead added to the shared CRM`,
+        }),
+        supabase.from("tasks").insert({
+          user_id: uid,
+          title: `Follow up with ${saved.name}`,
+          for_date: followDate,
+          proof_note: `Auto-created from lead ${saved.id}`,
+        }),
+        emitOperationEvent({
+          userId: uid,
+          eventType: "lead_added",
+          entityType: "lead",
+          entityId: saved.id,
+          title: "Lead added",
+          detail: `${saved.name} entered the CRM from ${saved.source ?? "an unspecified source"}.`,
+          source: "CRM",
+        }),
+        emitOperationEvent({
+          userId: uid,
+          eventType: zohoConnected ? "zoho_draft_requested" : "zoho_draft_queued",
+          entityType: "lead",
+          entityId: saved.id,
+          title: zohoConnected ? "Zoho draft requested" : "Zoho draft queued",
+          detail: zohoConnected
+            ? "Zoho is connected; the lead is ready for the approved draft workflow."
+            : "Zoho is not connected. No email was created or sent.",
+          source: "Outreach Command",
+        }),
+        emitOperationEvent({
+          userId: uid,
+          eventType: "ai_sales_manager_notified",
+          entityType: "lead",
+          entityId: saved.id,
+          title: "AI Sales Manager notified",
+          detail: `Next action: review ${saved.name} and personalize the first outreach.`,
+          source: "AI Sales Manager",
+        }),
+      ]);
+
+      const setupError = results.find((result: any) => result?.error)?.error;
+      if (setupError) {
+        toast.warning(`Lead saved; automation needs attention: ${setupError.message}`);
+      } else {
+        toast.success("Lead saved and follow-up workflow created");
+      }
+    } else {
+      if (previous?.status !== saved.status) {
+        await Promise.all([
+          supabase.from("lead_activities").insert({
+            user_id: uid,
+            lead_id: saved.id,
+            kind: saved.status,
+            detail: `Status changed from ${previous?.status ?? "Unknown"} to ${saved.status}`,
+          }),
+          emitOperationEvent({
+            userId: uid,
+            eventType: saved.status.toLowerCase().replace(/\s+/g, "_"),
+            entityType: "lead",
+            entityId: saved.id,
+            title: saved.status,
+            detail: `${saved.name} moved from ${previous?.status ?? "Unknown"} to ${saved.status}.`,
+            source: "CRM",
+          }),
+        ]);
+      }
+      toast.success("Lead saved");
+    }
     setEditOpen(false); setEditing(empty); load();
   };
 

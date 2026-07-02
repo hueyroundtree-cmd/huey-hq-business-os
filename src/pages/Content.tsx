@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { toast } from "sonner";
 import { FileText, Plus } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
+import { emitOperationEvent } from "@/lib/eventEngine";
 
 const STAGES = ["Idea","Script","Record","Edit","Review","Scheduled","Posted","Repurpose"] as const;
 type Stage = typeof STAGES[number];
@@ -38,8 +39,26 @@ export default function Content() {
     const uid = u.user?.id!;
     const payload: any = { ...editing, user_id: uid };
     if (!payload.scheduled_for) payload.scheduled_for = null;
-    const res = editing.id ? await supabase.from("content_items").update(payload).eq("id", editing.id) : await supabase.from("content_items").insert(payload);
+    const previous = editing.id ? items.find((item) => item.id === editing.id) : null;
+    const res = editing.id
+      ? await supabase.from("content_items").update(payload).eq("id", editing.id).select("*").single()
+      : await supabase.from("content_items").insert(payload).select("*").single();
     if (res.error) return toast.error(res.error.message);
+    const saved = res.data as Item;
+    if (!editing.id || previous?.stage !== saved.stage) {
+      const eventType = saved.stage === "Posted" ? "video_published" : `content_${saved.stage.toLowerCase()}`;
+      const event = await emitOperationEvent({
+        userId: uid,
+        eventType,
+        entityType: "content",
+        entityId: saved.id,
+        title: saved.stage === "Posted" ? "Video published" : `Content moved to ${saved.stage}`,
+        detail: saved.title,
+        source: "Content Creator OS",
+        metadata: { stage: saved.stage, posted_url: saved.posted_url },
+      });
+      if (event.error) toast.warning(`Content saved; timeline needs attention: ${event.error.message}`);
+    }
     toast.success("Saved");
     setOpen(false); load();
   };

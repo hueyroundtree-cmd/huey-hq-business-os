@@ -1,7 +1,8 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Users, DollarSign, FileText, ScrollText, Bot, Zap,
-  BookOpen, Map, Settings, Plug, LogOut, Menu, Sun, Moon, PlusCircle
+  BookOpen, Map, Settings, Plug, LogOut, Menu, Sun, Moon, PlusCircle,
+  BriefcaseBusiness, PackageOpen, Activity, HeartPulse, Search
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -10,11 +11,16 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useState } from "react";
 
 const NAV = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
-  { to: "/crm", label: "CRM", icon: Users },
-  { to: "/revenue", label: "Revenue", icon: DollarSign },
-  { to: "/content", label: "Content", icon: FileText },
-  { to: "/scripts", label: "Scripts", icon: ScrollText },
+  { to: "/", label: "Mission Control", icon: LayoutDashboard, end: true },
+  { to: "/command-center", label: "Command Center", icon: BriefcaseBusiness },
+  { to: "/module-store", label: "Module Store", icon: PackageOpen },
+  { to: "/outreach", label: "Outreach Command", icon: Users },
+  { to: "/timeline", label: "Operations Timeline", icon: Activity },
+  { to: "/health", label: "System Health", icon: HeartPulse },
+  { to: "/crm", label: "GFL CRM", icon: Users },
+  { to: "/scripts", label: "Script Library", icon: ScrollText },
+  { to: "/content", label: "Content Creator OS", icon: FileText },
+  { to: "/revenue", label: "Finance", icon: DollarSign },
   { to: "/executive", label: "Executive", icon: Bot },
   { to: "/automations", label: "Automations", icon: Zap },
   { to: "/knowledge", label: "Knowledge", icon: BookOpen },
@@ -23,7 +29,13 @@ const NAV = [
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
-const MOBILE_NAV = NAV.slice(0, 4).concat([{ to: "/scripts", label: "Scripts", icon: ScrollText }]);
+const MOBILE_NAV = [
+  NAV.find((item) => item.to === "/")!,
+  NAV.find((item) => item.to === "/command-center")!,
+  NAV.find((item) => item.to === "/outreach")!,
+  NAV.find((item) => item.to === "/content")!,
+  NAV.find((item) => item.to === "/revenue")!,
+];
 
 function SidebarInner({ onNavigate }: { onNavigate?: () => void }) {
   return (
@@ -122,6 +134,10 @@ export default function AppShell() {
           <div className="md:hidden font-display font-semibold">Huey HQ</div>
 
           <div className="ml-auto flex items-center gap-1.5">
+            <Button variant="outline" size="sm" onClick={() => navigate("/search")} className="gap-1.5">
+              <Search className="h-4 w-4" />
+              <span className="hidden lg:inline">Command Search</span>
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button size="sm" className="gap-1.5 bg-foreground text-background hover:bg-foreground/90" aria-label="Quick action">

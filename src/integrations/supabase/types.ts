@@ -462,6 +462,48 @@ export type Database = {
         }
         Relationships: []
       }
+      operations_events: {
+        Row: {
+          created_at: string
+          detail: string | null
+          entity_id: string | null
+          entity_type: string
+          event_type: string
+          id: string
+          metadata: Json
+          occurred_at: string
+          source: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          detail?: string | null
+          entity_id?: string | null
+          entity_type: string
+          event_type: string
+          id?: string
+          metadata?: Json
+          occurred_at?: string
+          source?: string
+          title: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          detail?: string | null
+          entity_id?: string | null
+          entity_type?: string
+          event_type?: string
+          id?: string
+          metadata?: Json
+          occurred_at?: string
+          source?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           business_name: string | null
