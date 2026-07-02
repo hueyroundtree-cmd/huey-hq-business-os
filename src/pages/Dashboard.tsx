@@ -13,11 +13,13 @@ import { ConnectionBadge } from "@/components/ConnectionBadge";
 import {
   Sunrise, Moon, DollarSign, Users, Bell, FileText, Wrench, AlertTriangle,
   Plug, FolderKanban, BookOpenCheck, ScrollText, Bot, Workflow, CheckCircle2,
+  CalendarDays, Video, Target, Sparkles, Plus, Gauge,
+  Dumbbell, GraduationCap, Send, CloudUpload, CalendarPlus, Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useSearchParams, Link } from "react-router-dom";
 import { NOTION_ENTITIES, type NotionEntityKey } from "@/lib/notionEntities";
-import { getNotionHealth, type NotionMappingHealth } from "@/lib/dashboard";
+import { getDailyDriverScore, getNotionHealth, type NotionMappingHealth } from "@/lib/dashboard";
 
 type Integration = { provider: string; status: "Connected" | "Not Connected" | "Error"; last_sync_at: string | null };
 
@@ -28,6 +30,17 @@ type AreaSummary = {
   detail: string;
   to: string;
   icon: typeof FileText;
+};
+
+type DailyActionKey = "money" | "content" | "outreach" | "skill" | "health";
+type DailyPlan = {
+  actions: Record<DailyActionKey, string>;
+  completed: Record<DailyActionKey, boolean>;
+};
+
+const EMPTY_PLAN: DailyPlan = {
+  actions: { money: "", content: "", outreach: "", skill: "", health: "" },
+  completed: { money: false, content: false, outreach: false, skill: false, health: false },
 };
 
 export default function Dashboard() {
@@ -49,10 +62,14 @@ export default function Dashboard() {
   const [notionMappings, setNotionMappings] = useState<NotionMappingHealth[]>([]);
   const [areaSummaries, setAreaSummaries] = useState<AreaSummary[]>([]);
   const [topTasks, setTopTasks] = useState<{ id: string; title: string; done: boolean }[]>([]);
+  const [dailyPlanRecord, setDailyPlanRecord] = useState<any | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [startOpen, setStartOpen] = useState(false);
   const [endOpen, setEndOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
+  const [tomorrowOpen, setTomorrowOpen] = useState(false);
+  const [syncingPlan, setSyncingPlan] = useState(false);
 
   const load = async () => {
     if (!user) return;
@@ -102,6 +119,7 @@ export default function Dashboard() {
     const cs = checkins.data ?? [];
     setMorning(cs.find((c) => c.kind === "morning") ?? null);
     setEvening(cs.find((c) => c.kind === "evening") ?? null);
+    setDailyPlanRecord(cs.find((c) => c.kind === "plan") ?? null);
     setCash(cs.find((c) => c.kind === "morning")?.cash_on_hand ?? null);
     setIntegrations((integ.data as Integration[]) ?? []);
     setTopTasks(tasks.data ?? []);
@@ -150,10 +168,100 @@ export default function Dashboard() {
     return list;
   }, [followUpsDue, billsDueTotal, contentDue, integrations]);
 
+  const missionControl = useMemo(() => {
+    const hour = new Date().getHours();
+    const greeting = hour < 12 ? "Good Morning" : hour < 18 ? "Good Afternoon" : "Good Evening";
+    const completedTop = topTasks.filter((task) => task.done).length;
+    const topTaskScore = topTasks.length ? (completedTop / topTasks.length) * 45 : 0;
+    const score = Math.round(
+      topTaskScore +
+      (morning ? 15 : 0) +
+      (evening ? 15 : 0) +
+      (revToday > 0 ? 10 : 0) +
+      (jobsToday > 0 ? 5 : 0) +
+      (newLeads > 0 ? 5 : 0) +
+      (contentDue > 0 ? 5 : 0)
+    );
+    const grade =
+      score >= 90 ? "Excellent work." :
+      score >= 70 ? "Strong progress." :
+      score >= 40 ? "Momentum is building." :
+      "Start with today's first verified action.";
+    const calendar = integrations.find((item) => item.provider === "Google Calendar");
+    return { greeting, score, grade, calendarConnected: calendar?.status === "Connected" };
+  }, [topTasks, morning, evening, revToday, jobsToday, newLeads, contentDue, integrations]);
+
+  const dailyPlan = useMemo<DailyPlan>(() => {
+    const summary = dailyPlanRecord?.summary_json as Partial<DailyPlan> | null;
+    return {
+      actions: { ...EMPTY_PLAN.actions, ...(summary?.actions ?? {}) },
+      completed: { ...EMPTY_PLAN.completed, ...(summary?.completed ?? {}) },
+    };
+  }, [dailyPlanRecord]);
+
+  const dailyScore = useMemo(() => {
+    return getDailyDriverScore(
+      topTasks.map((task) => task.done),
+      Object.values(dailyPlan.completed),
+    );
+  }, [topTasks, dailyPlan]);
+
+  const savePlan = async (plan: DailyPlan, date = todayISO()) => {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth.user?.id;
+    if (!uid) throw new Error("Sign in again before saving the Daily Driver.");
+    const existing = date === todayISO() ? dailyPlanRecord : null;
+    const payload = { user_id: uid, kind: "plan", check_date: date, summary_json: plan as any };
+    const result = existing
+      ? await supabase.from("daily_checkins").update(payload).eq("id", existing.id)
+      : await supabase.from("daily_checkins").insert(payload);
+    if (result.error) throw result.error;
+  };
+
+  const toggleDailyAction = async (key: DailyActionKey, checked: boolean) => {
+    if (!dailyPlanRecord) {
+      toast.error("Create today's plan before completing actions.");
+      return;
+    }
+    try {
+      await savePlan({ ...dailyPlan, completed: { ...dailyPlan.completed, [key]: checked } });
+      await load();
+    } catch (error: any) {
+      toast.error(error.message);
+    }
+  };
+
+  const pushPlanToNotion = async () => {
+    const mapping = notionMappings.find((item) => item.entity === "daily_checkins");
+    if (mapping?.status !== "Connected" || !mapping.verified_at) {
+      toast.error("Daily Driver Notion sync is not verified yet.", {
+        description: "Open Manage sync, verify Daily Driver, then try again.",
+      });
+      return;
+    }
+    if (!dailyPlanRecord) {
+      toast.error("Create today's plan before pushing it to Notion.");
+      return;
+    }
+    setSyncingPlan(true);
+    const { data, error } = await supabase.functions.invoke("notion-sync", {
+      body: { action: "sync", entity: "daily_checkins" },
+    });
+    if (error || !data?.synced) {
+      toast.error("Notion sync failed", { description: error?.message ?? data?.error ?? "No verified sync result returned." });
+    } else {
+      toast.success("Today's plan pushed to Notion", {
+        description: `${data.created ?? 0} created, ${data.updated ?? 0} updated, ${data.failed ?? 0} failed.`,
+      });
+      await load();
+    }
+    setSyncingPlan(false);
+  };
+
   return (
     <div>
       <PageHeader
-        title="CEO Dashboard"
+        title="Mission Control"
         description={new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
         actions={
           <>
@@ -164,6 +272,140 @@ export default function Dashboard() {
       />
 
       <div className="p-4 md:p-6 space-y-6">
+        <section className="surface overflow-hidden">
+          <div className="grid bg-gradient-to-br from-foreground via-foreground to-forest text-background lg:grid-cols-[1fr_260px]">
+            <div className="p-5 md:p-7">
+              <div className="flex items-center gap-2 text-gold">
+                <Target className="h-4 w-4" />
+                <span className="text-xs font-semibold uppercase tracking-[0.2em]">Command Center</span>
+              </div>
+              <h1 className="mt-3 font-display text-2xl font-semibold md:text-3xl">
+                {missionControl.greeting}, Huey
+              </h1>
+              <p className="mt-1 text-sm text-background/65">
+                Your live operating picture, priorities and next actions.
+              </p>
+
+              <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <MissionMetric label="Revenue Today" value={money(revToday)} icon={DollarSign} />
+                <MissionMetric label="Cash Available" value={cash === null ? "Verify" : money(cash)} icon={DollarSign} />
+                <MissionMetric label="Jobs" value={String(jobsToday)} icon={Wrench} />
+                <MissionMetric label="Leads" value={String(newLeads)} icon={Users} />
+                <MissionMetric label="Calendar" value={missionControl.calendarConnected ? "Connected" : "Not connected"} icon={CalendarDays} />
+                <MissionMetric label="Follow Ups" value={String(followUpsDue)} icon={Bell} />
+                <MissionMetric label="Videos" value={String(contentDue)} icon={Video} />
+                <MissionMetric label="Top 3 Done" value={`${topTasks.filter((task) => task.done).length}/${topTasks.length || 3}`} icon={CheckCircle2} />
+              </div>
+            </div>
+
+            <div className="flex flex-col justify-center border-t border-background/15 bg-background/5 p-5 lg:border-l lg:border-t-0">
+              <div className="flex items-center gap-2 text-background/60">
+                <Gauge className="h-4 w-4" />
+                <span className="text-xs font-semibold uppercase tracking-wider">Today's Score</span>
+              </div>
+              <div className="mt-2 text-5xl font-semibold tabular-nums">{missionControl.score}%</div>
+              <p className="mt-2 text-sm text-background/70">{missionControl.grade}</p>
+              <p className="mt-3 text-[11px] text-background/45">Calculated from verified Huey HQ activity.</p>
+            </div>
+          </div>
+
+          <div className="grid gap-4 border-t p-4 lg:grid-cols-[1fr_1fr]">
+            <div>
+              <div className="mb-2 flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-gold" />
+                <h2 className="font-display text-sm font-semibold">AI Briefing</h2>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {recs[0]?.title ?? "No urgent verified alerts. Use the next action to create revenue or publish proof."}
+                {recs[0]?.detail ? ` ${recs[0].detail}` : ""}
+              </p>
+            </div>
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quick Actions</div>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => setStartOpen(true)}><Sunrise className="mr-1.5 h-3.5 w-3.5" />Start My Day</Button>
+                <Button size="sm" variant="outline" asChild><Link to="/crm?new=1"><Plus className="mr-1.5 h-3.5 w-3.5" />Add Lead</Link></Button>
+                <Button size="sm" variant="outline" asChild><Link to="/crm?new=1">Book Job</Link></Button>
+                <Button size="sm" variant="outline" asChild><Link to="/revenue?new=1">Log Revenue</Link></Button>
+                <Button size="sm" variant="outline" asChild><Link to="/content?new=1">Create Content</Link></Button>
+                <Button size="sm" onClick={() => setEndOpen(true)}><Moon className="mr-1.5 h-3.5 w-3.5" />End My Day</Button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="surface p-4 md:p-5">
+          <div className="flex flex-col gap-3 border-b pb-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <Sunrise className="h-4 w-4 text-gold" />
+                <h2 className="font-display text-base font-semibold">Daily Driver</h2>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">One plan for money, visibility, growth, and health.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => setPlanOpen(true)}>
+                <Pencil className="mr-1.5 h-3.5 w-3.5" />{dailyPlanRecord ? "Edit today's plan" : "Create today's plan"}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setTomorrowOpen(true)}>
+                <CalendarPlus className="mr-1.5 h-3.5 w-3.5" />Create tomorrow's plan
+              </Button>
+              <Button size="sm" onClick={pushPlanToNotion} disabled={syncingPlan}>
+                <CloudUpload className="mr-1.5 h-3.5 w-3.5" />{syncingPlan ? "Syncing..." : "Push to Notion"}
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-5 pt-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_220px]">
+            <div>
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Today's Top 3</h3>
+              {topTasks.length === 0 ? (
+                <button className="text-left text-sm text-muted-foreground underline underline-offset-2" onClick={() => setStartOpen(true)}>
+                  Start My Day to set your priorities.
+                </button>
+              ) : (
+                <ul className="space-y-2">
+                  {topTasks.map((task) => (
+                    <li key={task.id} className="flex items-start gap-2">
+                      <Checkbox
+                        checked={task.done}
+                        onCheckedChange={async (value) => {
+                          await supabase.from("tasks").update({ done: !!value }).eq("id", task.id);
+                          load();
+                        }}
+                      />
+                      <span className={`text-sm ${task.done ? "line-through text-muted-foreground" : ""}`}>{task.title}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div>
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Action lanes</h3>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <DailyAction icon={DollarSign} label="Money action" value={dailyPlan.actions.money} checked={dailyPlan.completed.money} onChecked={(v) => toggleDailyAction("money", v)} />
+                <DailyAction icon={Video} label="Content action" value={dailyPlan.actions.content} checked={dailyPlan.completed.content} onChecked={(v) => toggleDailyAction("content", v)} />
+                <DailyAction icon={Send} label="Outreach action" value={dailyPlan.actions.outreach} checked={dailyPlan.completed.outreach} onChecked={(v) => toggleDailyAction("outreach", v)} />
+                <DailyAction icon={GraduationCap} label="Skill action" value={dailyPlan.actions.skill} checked={dailyPlan.completed.skill} onChecked={(v) => toggleDailyAction("skill", v)} />
+                <DailyAction icon={Dumbbell} label="Health action" value={dailyPlan.actions.health} checked={dailyPlan.completed.health} onChecked={(v) => toggleDailyAction("health", v)} />
+              </div>
+            </div>
+
+            <div className="border-t pt-4 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Daily scorecard</h3>
+              <div className="mt-2 text-4xl font-semibold tabular-nums">{dailyScore.percent}%</div>
+              <p className="mt-1 text-sm text-muted-foreground">{dailyScore.done} of {dailyScore.possible} commitments complete</p>
+              <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
+                <div className="h-full bg-forest transition-all" style={{ width: `${dailyScore.percent}%` }} />
+              </div>
+              <Button className="mt-5 w-full" variant="outline" onClick={() => setEndOpen(true)}>
+                <Moon className="mr-1.5 h-3.5 w-3.5" />End-of-day review
+              </Button>
+            </div>
+          </div>
+        </section>
+
         <section className={`surface p-4 border-l-4 ${notionStatus === "Connected" ? "border-l-forest" : notionStatus === "Error" ? "border-l-destructive" : "border-l-gold"}`}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
@@ -318,12 +560,172 @@ export default function Dashboard() {
       <StartDayDialog open={startOpen} onClose={() => setStartOpen(false)} onSaved={load}
         counts={{ jobsToday, followUpsDue, billsDueTotal, contentDue, newLeads }}
         bankConnected={bankConnected} />
-      <EndDayDialog open={endOpen} onClose={() => setEndOpen(false)} onSaved={load} />
+      <EndDayDialog
+        open={endOpen}
+        onClose={() => setEndOpen(false)}
+        onSaved={load}
+        dailyDriver={{ score: dailyScore, plan: dailyPlan }}
+      />
+      <PlanDialog
+        open={planOpen}
+        title="Today's Daily Driver"
+        initial={dailyPlan}
+        onClose={() => setPlanOpen(false)}
+        onSave={async (plan) => {
+          await savePlan(plan);
+          toast.success("Today's plan saved");
+          setPlanOpen(false);
+          await load();
+        }}
+      />
+      <TomorrowPlanDialog open={tomorrowOpen} onClose={() => setTomorrowOpen(false)} onSaved={load} />
     </div>
   );
 }
 
 const PROVIDERS = ["Notion","Google Drive","Google Calendar","Gmail","Zoho Mail","Shopify","Stan Store","Square"];
+
+function MissionMetric({ label, value, icon: Icon }: any) {
+  return (
+    <div className="rounded-md border border-background/15 bg-background/5 p-2.5">
+      <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wide text-background/50">
+        <span>{label}</span>
+        <Icon className="h-3 w-3" />
+      </div>
+      <div className="mt-1 truncate text-sm font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function DailyAction({ icon: Icon, label, value, checked, onChecked }: any) {
+  return (
+    <label className="flex min-h-20 cursor-pointer items-start gap-3 rounded-md border bg-background p-3">
+      <Checkbox checked={checked} disabled={!value} onCheckedChange={(next) => onChecked(!!next)} />
+      <div className="min-w-0">
+        <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <Icon className="h-3.5 w-3.5" />{label}
+        </div>
+        <p className={`mt-1 text-sm ${checked ? "line-through text-muted-foreground" : ""}`}>
+          {value || "Not planned yet"}
+        </p>
+      </div>
+    </label>
+  );
+}
+
+function PlanDialog({ open, title, initial, onClose, onSave }: {
+  open: boolean;
+  title: string;
+  initial: DailyPlan;
+  onClose: () => void;
+  onSave: (plan: DailyPlan) => Promise<void>;
+}) {
+  const [plan, setPlan] = useState<DailyPlan>(initial);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (open) setPlan(initial); }, [open, initial]);
+  const fields: { key: DailyActionKey; label: string }[] = [
+    { key: "money", label: "Money action" },
+    { key: "content", label: "Content action" },
+    { key: "outreach", label: "Outreach action" },
+    { key: "skill", label: "Skill action" },
+    { key: "health", label: "Health action" },
+  ];
+  return (
+    <Dialog open={open} onOpenChange={(value) => !value && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>Keep each action specific enough to verify before closing the day.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          {fields.map((field) => (
+            <div key={field.key}>
+              <Label>{field.label}</Label>
+              <Input
+                value={plan.actions[field.key]}
+                onChange={(event) => setPlan({
+                  ...plan,
+                  actions: { ...plan.actions, [field.key]: event.target.value },
+                })}
+                placeholder={`Define today's ${field.label.toLowerCase()}`}
+              />
+            </div>
+          ))}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={async () => {
+            setBusy(true);
+            try { await onSave(plan); } catch (error: any) { toast.error(error.message); }
+            setBusy(false);
+          }} disabled={busy}>{busy ? "Saving..." : "Save plan"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function TomorrowPlanDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
+  const [plan, setPlan] = useState<DailyPlan>(EMPTY_PLAN);
+  const [priorities, setPriorities] = useState(["", "", ""]);
+  const [busy, setBusy] = useState(false);
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowISO = tomorrow.toISOString().slice(0, 10);
+  return (
+    <Dialog open={open} onOpenChange={(value) => !value && onClose()}>
+      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Create tomorrow's plan</DialogTitle>
+          <DialogDescription>{tomorrow.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label>Tomorrow's Top 3</Label>
+            {priorities.map((priority, index) => (
+              <Input key={index} value={priority} onChange={(event) => {
+                const next = [...priorities]; next[index] = event.target.value; setPriorities(next);
+              }} placeholder={`Priority ${index + 1}`} />
+            ))}
+          </div>
+          {(Object.keys(plan.actions) as DailyActionKey[]).map((key) => (
+            <div key={key}>
+              <Label>{key.charAt(0).toUpperCase() + key.slice(1)} action</Label>
+              <Input value={plan.actions[key]} onChange={(event) => setPlan({
+                ...plan, actions: { ...plan.actions, [key]: event.target.value },
+              })} />
+            </div>
+          ))}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={busy} onClick={async () => {
+            setBusy(true);
+            const { data: auth } = await supabase.auth.getUser();
+            const uid = auth.user?.id;
+            if (!uid) { toast.error("Sign in again before saving."); setBusy(false); return; }
+            const tasks = priorities.filter(Boolean).map((title) => ({
+              user_id: uid, title, is_top_priority: true, for_date: tomorrowISO,
+            }));
+            const [planResult, taskResult] = await Promise.all([
+              supabase.from("daily_checkins").insert({
+                user_id: uid, kind: "plan", check_date: tomorrowISO, summary_json: plan as any,
+              }),
+              tasks.length ? supabase.from("tasks").insert(tasks) : Promise.resolve({ error: null }),
+            ]);
+            const error = planResult.error ?? taskResult.error;
+            if (error) toast.error(error.message);
+            else {
+              toast.success("Tomorrow's plan created");
+              setPlan(EMPTY_PLAN); setPriorities(["", "", ""]); onClose(); onSaved();
+            }
+            setBusy(false);
+          }}>{busy ? "Creating..." : "Create tomorrow's plan"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function Stat({ label, value, hint, icon: Icon, accent, warn }: any) {
   return (
@@ -407,7 +809,7 @@ function StartDayDialog({ open, onClose, onSaved, counts, bankConnected }: any) 
   );
 }
 
-function EndDayDialog({ open, onClose, onSaved }: any) {
+function EndDayDialog({ open, onClose, onSaved, dailyDriver }: any) {
   const [wins, setWins] = useState("");
   const [proof, setProof] = useState("");
   const [carry, setCarry] = useState(false);
@@ -439,7 +841,7 @@ function EndDayDialog({ open, onClose, onSaved }: any) {
     const uid = u.user?.id!;
     const { error } = await supabase.from("daily_checkins").insert({
       user_id: uid, kind: "evening", notes: wins,
-      summary_json: { snapshot, proof, carry_forward: carry },
+      summary_json: { snapshot, proof, carry_forward: carry, daily_driver: dailyDriver },
     });
     if (!error && carry && snapshot?.incompleteTop?.length) {
       const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
@@ -466,6 +868,10 @@ function EndDayDialog({ open, onClose, onSaved }: any) {
             <div>Tasks: <span className="text-foreground font-medium">{snapshot.completedTasks}/{snapshot.totalTasks}</span></div>
             <div>Leads contacted: <span className="text-foreground font-medium">{snapshot.leadsContacted}</span></div>
             <div>Top priorities not done: <span className="text-foreground font-medium">{snapshot.incompleteTop?.length ?? 0}</span></div>
+            <div>Daily Driver score: <span className="text-foreground font-medium">{dailyDriver?.score?.percent ?? 0}%</span></div>
+            <div>Action lanes: <span className="text-foreground font-medium">
+              {Object.values(dailyDriver?.plan?.completed ?? {}).filter(Boolean).length}/5
+            </span></div>
           </div>
         )}
         <div className="space-y-3">

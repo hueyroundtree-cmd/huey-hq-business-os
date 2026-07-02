@@ -28,3 +28,13 @@ export function getNotionHealth(mappings: NotionMappingHealth[]) {
 
   return { status, connectedCount: connected.length, lastSync };
 }
+
+export function getDailyDriverScore(topTaskStates: boolean[], actionStates: boolean[]) {
+  const done = [...topTaskStates, ...actionStates].filter(Boolean).length;
+  const possible = Math.max(topTaskStates.length, 3) + actionStates.length;
+  return {
+    done,
+    possible,
+    percent: possible ? Math.round((done / possible) * 100) : 0,
+  };
+}
