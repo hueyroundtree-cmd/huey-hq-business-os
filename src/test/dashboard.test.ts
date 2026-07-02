@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDailyPlanPayload,
+  buildDailyPlanSyncRequest,
   getDailyDriverScore,
   getNotionHealth,
   type NotionMappingHealth,
@@ -68,6 +69,14 @@ describe("Daily Driver plan persistence", () => {
       kind: "plan",
       check_date: "2026-07-02",
       summary_json: { actions: {}, completed: {} },
+    });
+  });
+
+  it("targets only the saved plan when pushing to Notion", () => {
+    expect(buildDailyPlanSyncRequest("plan-record-id")).toEqual({
+      action: "sync",
+      entity: "daily_checkins",
+      record_id: "plan-record-id",
     });
   });
 });

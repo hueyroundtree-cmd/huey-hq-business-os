@@ -51,3 +51,11 @@ export function buildDailyPlanPayload(
     summary_json: summary,
   } as const;
 }
+
+export function buildDailyPlanSyncRequest(recordId: string) {
+  return {
+    action: "sync",
+    entity: "daily_checkins",
+    record_id: recordId,
+  } as const;
+}

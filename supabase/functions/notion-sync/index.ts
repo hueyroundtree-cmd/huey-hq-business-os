@@ -286,6 +286,7 @@ Deno.serve(async (request) => {
   const body = await request.json().catch(() => ({ action: "verify" }));
   const action = body.action === "sync" ? "sync" : "verify";
   const entity = String(body.entity || (action === "sync" ? "tasks" : ""));
+  const recordId = typeof body.record_id === "string" ? body.record_id : null;
   let notionVerified = false;
 
   if (!notionToken) {
@@ -350,6 +351,7 @@ Deno.serve(async (request) => {
       .select(definition.select)
       .order(definition.orderBy || "updated_at", { ascending: true });
     if (definition.filter) sourceQuery = sourceQuery.eq(definition.filter.column, definition.filter.value);
+    if (recordId) sourceQuery = sourceQuery.eq("id", recordId);
     const { data: rows, error: sourceError } = await sourceQuery;
     if (sourceError) throw sourceError;
 
@@ -366,6 +368,7 @@ Deno.serve(async (request) => {
     let updated = 0;
     let skippedFields = 0;
     let failed = 0;
+    const recordErrors: Array<{ id: string; error: string }> = [];
 
     for (const row of rows as Record<string, any>[]) {
       try {
@@ -409,9 +412,11 @@ Deno.serve(async (request) => {
         }
       } catch (recordError) {
         failed += 1;
+        const recordDetail = recordError instanceof Error ? recordError.message : "Unknown record error";
+        recordErrors.push({ id: String(row.id), error: recordDetail });
         await audit(
           "failed",
-          `Record ${row.id}: ${recordError instanceof Error ? recordError.message : "Unknown record error"}`,
+          `Record ${row.id}: ${recordDetail}`,
           entity,
         );
       }
@@ -426,7 +431,17 @@ Deno.serve(async (request) => {
       const detail = `${entity} sync incomplete: ${created} created, ${updated} updated, ${failed} failed.`;
       await setMapping(entity, { status: "Error", last_error: detail, last_sync_at: completedAt });
       await audit("failed", detail, entity);
-      return json({ connected: true, synced: false, entity, created, updated, skipped: skippedFields, failed, error: detail });
+      return json({
+        connected: true,
+        synced: false,
+        entity,
+        created,
+        updated,
+        skipped: skippedFields,
+        failed,
+        error: detail,
+        record_errors: recordErrors,
+      });
     }
 
     const detail = `${entity} sync complete: ${created} created, ${updated} updated, ${skippedFields} optional fields skipped.`;

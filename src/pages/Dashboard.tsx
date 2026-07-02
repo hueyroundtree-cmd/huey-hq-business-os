@@ -21,6 +21,7 @@ import { useSearchParams, Link } from "react-router-dom";
 import { NOTION_ENTITIES, type NotionEntityKey } from "@/lib/notionEntities";
 import {
   buildDailyPlanPayload,
+  buildDailyPlanSyncRequest,
   getDailyDriverScore,
   getNotionHealth,
   type NotionMappingHealth,
@@ -266,10 +267,20 @@ export default function Dashboard() {
     }
     setSyncingPlan(true);
     const { data, error } = await supabase.functions.invoke("notion-sync", {
-      body: { action: "sync", entity: "daily_checkins" },
+      body: buildDailyPlanSyncRequest(dailyPlanRecord.id),
     });
     if (error || !data?.synced) {
-      toast.error("Notion sync failed", { description: error?.message ?? data?.error ?? "No verified sync result returned." });
+      let detail = data?.record_errors?.[0]?.error ?? data?.error ?? error?.message ?? "No verified sync result returned.";
+      const response = (error as any)?.context;
+      if (response?.json) {
+        try {
+          const payload = await response.clone().json();
+          detail = payload?.record_errors?.[0]?.error ?? payload?.error ?? detail;
+        } catch {
+          // Keep the best available error when the response body is not JSON.
+        }
+      }
+      toast.error("Notion sync failed", { description: detail });
     } else {
       toast.success("Today's plan pushed to Notion", {
         description: `${data.created ?? 0} created, ${data.updated ?? 0} updated, ${data.failed ?? 0} failed.`,
