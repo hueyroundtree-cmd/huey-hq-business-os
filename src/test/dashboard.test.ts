@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { getDailyDriverScore, getNotionHealth, type NotionMappingHealth } from "@/lib/dashboard";
+import {
+  buildDailyPlanPayload,
+  getDailyDriverScore,
+  getNotionHealth,
+  type NotionMappingHealth,
+} from "@/lib/dashboard";
 import { NOTION_ENTITIES } from "@/lib/notionEntities";
 
 const mapping = (
@@ -49,5 +54,20 @@ describe("Daily Driver scorecard", () => {
   it("keeps three priority slots in the denominator before priorities are entered", () => {
     expect(getDailyDriverScore([], [true, false, false, false, false]))
       .toEqual({ done: 1, possible: 8, percent: 13 });
+  });
+});
+
+describe("Daily Driver plan persistence", () => {
+  it("builds the complete authenticated daily_checkins payload", () => {
+    expect(buildDailyPlanPayload(
+      "00000000-0000-0000-0000-000000000001",
+      "2026-07-02",
+      { actions: {}, completed: {} },
+    )).toEqual({
+      user_id: "00000000-0000-0000-0000-000000000001",
+      kind: "plan",
+      check_date: "2026-07-02",
+      summary_json: { actions: {}, completed: {} },
+    });
   });
 });

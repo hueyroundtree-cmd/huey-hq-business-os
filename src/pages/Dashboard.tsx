@@ -19,7 +19,12 @@ import {
 import { toast } from "sonner";
 import { useSearchParams, Link } from "react-router-dom";
 import { NOTION_ENTITIES, type NotionEntityKey } from "@/lib/notionEntities";
-import { getDailyDriverScore, getNotionHealth, type NotionMappingHealth } from "@/lib/dashboard";
+import {
+  buildDailyPlanPayload,
+  getDailyDriverScore,
+  getNotionHealth,
+  type NotionMappingHealth,
+} from "@/lib/dashboard";
 import { getNextFollowUps, getOpenPipelineValue, type LeadStatus } from "@/lib/crmPipeline";
 
 type Integration = { provider: string; status: "Connected" | "Not Connected" | "Error"; last_sync_at: string | null };
@@ -227,7 +232,7 @@ export default function Dashboard() {
     const uid = auth.user?.id;
     if (!uid) throw new Error("Sign in again before saving the Daily Driver.");
     const existing = date === todayISO() ? dailyPlanRecord : null;
-    const payload = { user_id: uid, kind: "plan", check_date: date, summary_json: plan as any };
+    const payload = buildDailyPlanPayload(uid, date, plan as unknown as Record<string, unknown>);
     const result = existing
       ? await supabase.from("daily_checkins").update(payload).eq("id", existing.id)
       : await supabase.from("daily_checkins").insert(payload);
@@ -717,7 +722,13 @@ function PlanDialog({ open, title, initial, onClose, onSave }: {
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={async () => {
             setBusy(true);
-            try { await onSave(plan); } catch (error: any) { toast.error(error.message); }
+            try {
+              await onSave(plan);
+            } catch (error: unknown) {
+              toast.error("Daily Driver save failed", {
+                description: error instanceof Error ? error.message : "Unknown save error",
+              });
+            }
             setBusy(false);
           }} disabled={busy}>{busy ? "Saving..." : "Save plan"}</Button>
         </DialogFooter>
