@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { useSearchParams, Link } from "react-router-dom";
 import { NOTION_ENTITIES, type NotionEntityKey } from "@/lib/notionEntities";
 import { getDailyDriverScore, getNotionHealth, type NotionMappingHealth } from "@/lib/dashboard";
+import { getNextFollowUps, getOpenPipelineValue, type LeadStatus } from "@/lib/crmPipeline";
 
 type Integration = { provider: string; status: "Connected" | "Not Connected" | "Error"; last_sync_at: string | null };
 
@@ -30,6 +31,15 @@ type AreaSummary = {
   detail: string;
   to: string;
   icon: typeof FileText;
+};
+
+type FollowUpLead = {
+  id: string;
+  name: string;
+  business: string | null;
+  status: LeadStatus;
+  estimated_value: number | null;
+  next_follow_up_at: string | null;
 };
 
 type DailyActionKey = "money" | "content" | "outreach" | "skill" | "health";
@@ -63,6 +73,7 @@ export default function Dashboard() {
   const [areaSummaries, setAreaSummaries] = useState<AreaSummary[]>([]);
   const [topTasks, setTopTasks] = useState<{ id: string; title: string; done: boolean }[]>([]);
   const [dailyPlanRecord, setDailyPlanRecord] = useState<any | null>(null);
+  const [pipelineLeads, setPipelineLeads] = useState<FollowUpLead[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [startOpen, setStartOpen] = useState(false);
@@ -81,11 +92,11 @@ export default function Dashboard() {
     setLoadError(null);
     const [
       rev, leadsRes, followRes, jobsRes, billsRes, contentRes, checkins, integ, tasks,
-      mappingsRes, projectsRes, sopsRes, scriptsRes, commandsRes, automationsRes,
+      mappingsRes, projectsRes, sopsRes, scriptsRes, commandsRes, automationsRes, pipelineRes,
     ] = await Promise.all([
       supabase.from("revenue_entries").select("amount, entry_date").gte("entry_date", month),
       supabase.from("leads").select("id", { count: "exact", head: true }).eq("status", "New Lead"),
-      supabase.from("leads").select("id", { count: "exact", head: true }).lte("next_follow_up_at", new Date().toISOString()).not("next_follow_up_at", "is", null).neq("status", "Lost").neq("status", "Completed"),
+      supabase.from("leads").select("id", { count: "exact", head: true }).lte("next_follow_up_at", new Date().toISOString()).not("next_follow_up_at", "is", null).neq("status", "Closed/Lost").neq("status", "Completed"),
       supabase.from("jobs").select("id", { count: "exact", head: true }).gte("scheduled_at", `${today}T00:00:00Z`).lt("scheduled_at", `${today}T23:59:59Z`),
       supabase.from("bills").select("amount").eq("paid", false).lte("due_date", today),
       supabase.from("content_items").select("id", { count: "exact", head: true }).in("stage", ["Idea", "Script", "Record", "Edit", "Review"]),
@@ -98,11 +109,12 @@ export default function Dashboard() {
       supabase.from("scripts").select("id", { count: "exact", head: true }),
       (supabase.from("ai_commands") as any).select("id", { count: "exact", head: true }).eq("active", true),
       supabase.from("automations").select("id, status"),
+      supabase.from("leads").select("id,name,business,status,estimated_value,next_follow_up_at"),
     ]);
 
     const responses = [
       rev, leadsRes, followRes, jobsRes, billsRes, contentRes, checkins, integ, tasks,
-      mappingsRes, projectsRes, sopsRes, scriptsRes, commandsRes, automationsRes,
+      mappingsRes, projectsRes, sopsRes, scriptsRes, commandsRes, automationsRes, pipelineRes,
     ];
     const firstError = responses.find((response) => response.error)?.error;
     if (firstError) setLoadError(firstError.message);
@@ -120,6 +132,7 @@ export default function Dashboard() {
     setMorning(cs.find((c) => c.kind === "morning") ?? null);
     setEvening(cs.find((c) => c.kind === "evening") ?? null);
     setDailyPlanRecord(cs.find((c) => c.kind === "plan") ?? null);
+    setPipelineLeads((pipelineRes.data as FollowUpLead[]) ?? []);
     setCash(cs.find((c) => c.kind === "morning")?.cash_on_hand ?? null);
     setIntegrations((integ.data as Integration[]) ?? []);
     setTopTasks(tasks.data ?? []);
@@ -205,6 +218,9 @@ export default function Dashboard() {
       Object.values(dailyPlan.completed),
     );
   }, [topTasks, dailyPlan]);
+
+  const openPipelineValue = useMemo(() => getOpenPipelineValue(pipelineLeads), [pipelineLeads]);
+  const nextFollowUps = useMemo(() => getNextFollowUps(pipelineLeads), [pipelineLeads]);
 
   const savePlan = async (plan: DailyPlan, date = todayISO()) => {
     const { data: auth } = await supabase.auth.getUser();
@@ -402,6 +418,51 @@ export default function Dashboard() {
               <Button className="mt-5 w-full" variant="outline" onClick={() => setEndOpen(true)}>
                 <Moon className="mr-1.5 h-3.5 w-3.5" />End-of-day review
               </Button>
+            </div>
+          </div>
+        </section>
+
+        <section className="surface p-4 md:p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-gold" />
+                <h2 className="font-display text-base font-semibold">CRM Revenue Pipeline</h2>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">Open opportunities and the next five follow-ups from the shared CRM.</p>
+            </div>
+            <Button size="sm" variant="outline" asChild><Link to="/crm">Open CRM</Link></Button>
+          </div>
+          <div className="mt-4 grid gap-4 md:grid-cols-[220px_1fr]">
+            <div className="border-b pb-4 md:border-b-0 md:border-r md:pb-0 md:pr-4">
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Open pipeline value</div>
+              <div className="mt-2 text-3xl font-semibold tabular-nums">{money(openPipelineValue)}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {pipelineLeads.filter((lead) => !["Completed", "Closed/Lost"].includes(lead.status)).length} open leads
+              </div>
+            </div>
+            <div>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Next 5 follow-ups</h3>
+              {nextFollowUps.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No follow-ups are scheduled.</p>
+              ) : (
+                <div className="divide-y">
+                  {nextFollowUps.map((lead) => {
+                    const overdue = Boolean(lead.next_follow_up_at && lead.next_follow_up_at < new Date().toISOString());
+                    return (
+                      <Link key={lead.id} to="/crm" className="flex items-center justify-between gap-3 py-2 text-sm">
+                        <div className="min-w-0">
+                          <div className="truncate font-medium">{lead.name}</div>
+                          <div className="truncate text-xs text-muted-foreground">{lead.business ?? lead.status}</div>
+                        </div>
+                        <div className={`shrink-0 text-xs ${overdue ? "font-medium text-destructive" : "text-muted-foreground"}`}>
+                          {lead.next_follow_up_at ? new Date(lead.next_follow_up_at).toLocaleDateString() : ""}
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </section>
