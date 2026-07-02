@@ -14,6 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_commands: {
+        Row: {
+          active: boolean
+          command: string
+          created_at: string
+          department: string | null
+          id: string
+          title: string
+          updated_at: string
+          usage_notes: string | null
+          user_id: string
+        }
+        Insert: {
+          active?: boolean
+          command: string
+          created_at?: string
+          department?: string | null
+          id?: string
+          title: string
+          updated_at?: string
+          usage_notes?: string | null
+          user_id: string
+        }
+        Update: {
+          active?: boolean
+          command?: string
+          created_at?: string
+          department?: string | null
+          id?: string
+          title?: string
+          updated_at?: string
+          usage_notes?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       automations: {
         Row: {
           agent_name: string
@@ -90,6 +126,51 @@ export type Database = {
           name?: string
           notes?: string | null
           paid?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      business_projects: {
+        Row: {
+          business: string | null
+          created_at: string
+          due_date: string | null
+          id: string
+          next_action: string | null
+          notes: string | null
+          owner: string | null
+          priority: string | null
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          business?: string | null
+          created_at?: string
+          due_date?: string | null
+          id?: string
+          next_action?: string | null
+          notes?: string | null
+          owner?: string | null
+          priority?: string | null
+          status?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          business?: string | null
+          created_at?: string
+          due_date?: string | null
+          id?: string
+          next_action?: string | null
+          notes?: string | null
+          owner?: string | null
+          priority?: string | null
+          status?: string
+          title?: string
           updated_at?: string
           user_id?: string
         }
@@ -516,30 +597,42 @@ export type Database = {
           entity: string
           field_map: Json
           id: string
+          last_error: string | null
+          last_sync_at: string | null
           provider: string
+          status: Database["public"]["Enums"]["integration_status"]
           target_ref: string
           updated_at: string
           user_id: string
+          verified_at: string | null
         }
         Insert: {
           created_at?: string
           entity: string
           field_map?: Json
           id?: string
+          last_error?: string | null
+          last_sync_at?: string | null
           provider: string
+          status?: Database["public"]["Enums"]["integration_status"]
           target_ref: string
           updated_at?: string
           user_id: string
+          verified_at?: string | null
         }
         Update: {
           created_at?: string
           entity?: string
           field_map?: Json
           id?: string
+          last_error?: string | null
+          last_sync_at?: string | null
           provider?: string
+          status?: Database["public"]["Enums"]["integration_status"]
           target_ref?: string
           updated_at?: string
           user_id?: string
+          verified_at?: string | null
         }
         Relationships: []
       }

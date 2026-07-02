@@ -10,11 +10,25 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { money, todayISO, startOfWeekISO, startOfMonthISO, relTime } from "@/lib/format";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
-import { Sunrise, Moon, DollarSign, Users, Bell, FileText, Wrench, AlertTriangle, Plug } from "lucide-react";
+import {
+  Sunrise, Moon, DollarSign, Users, Bell, FileText, Wrench, AlertTriangle,
+  Plug, FolderKanban, BookOpenCheck, ScrollText, Bot, Workflow, CheckCircle2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useSearchParams, Link } from "react-router-dom";
+import { NOTION_ENTITIES, type NotionEntityKey } from "@/lib/notionEntities";
+import { getNotionHealth, type NotionMappingHealth } from "@/lib/dashboard";
 
 type Integration = { provider: string; status: "Connected" | "Not Connected" | "Error"; last_sync_at: string | null };
+
+type AreaSummary = {
+  key: NotionEntityKey;
+  label: string;
+  value: string;
+  detail: string;
+  to: string;
+  icon: typeof FileText;
+};
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -32,7 +46,10 @@ export default function Dashboard() {
   const [morning, setMorning] = useState<any | null>(null);
   const [evening, setEvening] = useState<any | null>(null);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
+  const [notionMappings, setNotionMappings] = useState<NotionMappingHealth[]>([]);
+  const [areaSummaries, setAreaSummaries] = useState<AreaSummary[]>([]);
   const [topTasks, setTopTasks] = useState<{ id: string; title: string; done: boolean }[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [startOpen, setStartOpen] = useState(false);
   const [endOpen, setEndOpen] = useState(false);
@@ -44,7 +61,11 @@ export default function Dashboard() {
     const week = startOfWeekISO();
     const month = startOfMonthISO();
 
-    const [rev, leadsRes, followRes, jobsRes, billsRes, contentRes, checkins, integ, tasks] = await Promise.all([
+    setLoadError(null);
+    const [
+      rev, leadsRes, followRes, jobsRes, billsRes, contentRes, checkins, integ, tasks,
+      mappingsRes, projectsRes, sopsRes, scriptsRes, commandsRes, automationsRes,
+    ] = await Promise.all([
       supabase.from("revenue_entries").select("amount, entry_date").gte("entry_date", month),
       supabase.from("leads").select("id", { count: "exact", head: true }).eq("status", "New Lead"),
       supabase.from("leads").select("id", { count: "exact", head: true }).lte("next_follow_up_at", new Date().toISOString()).not("next_follow_up_at", "is", null).neq("status", "Lost").neq("status", "Completed"),
@@ -54,7 +75,20 @@ export default function Dashboard() {
       supabase.from("daily_checkins").select("*").eq("check_date", today).order("created_at", { ascending: false }),
       supabase.from("integrations").select("provider, status, last_sync_at"),
       supabase.from("tasks").select("id, title, done").eq("for_date", today).eq("is_top_priority", true).order("created_at"),
+      (supabase.from("sync_mappings") as any).select("entity, status, last_sync_at, last_error, verified_at").eq("provider", "Notion"),
+      (supabase.from("business_projects") as any).select("id, status, due_date"),
+      supabase.from("knowledge_docs").select("id", { count: "exact", head: true }).eq("category", "SOPs"),
+      supabase.from("scripts").select("id", { count: "exact", head: true }),
+      (supabase.from("ai_commands") as any).select("id", { count: "exact", head: true }).eq("active", true),
+      supabase.from("automations").select("id, status"),
     ]);
+
+    const responses = [
+      rev, leadsRes, followRes, jobsRes, billsRes, contentRes, checkins, integ, tasks,
+      mappingsRes, projectsRes, sopsRes, scriptsRes, commandsRes, automationsRes,
+    ];
+    const firstError = responses.find((response) => response.error)?.error;
+    if (firstError) setLoadError(firstError.message);
 
     const entries = rev.data ?? [];
     setRevToday(entries.filter((e) => e.entry_date === today).reduce((s, e) => s + Number(e.amount), 0));
@@ -71,6 +105,27 @@ export default function Dashboard() {
     setCash(cs.find((c) => c.kind === "morning")?.cash_on_hand ?? null);
     setIntegrations((integ.data as Integration[]) ?? []);
     setTopTasks(tasks.data ?? []);
+    const mappings = (mappingsRes.data ?? []) as NotionMappingHealth[];
+    setNotionMappings(mappings);
+
+    const projects = (projectsRes.data ?? []) as { status: string; due_date: string | null }[];
+    const activeProjects = projects.filter((project) => !["Completed", "Cancelled", "Done"].includes(project.status)).length;
+    const automationRows = automationsRes.data ?? [];
+    const automationErrors = automationRows.filter((automation) => automation.status === "Error").length;
+    const taskDone = (tasks.data ?? []).filter((task) => task.done).length;
+    const checkinKinds = new Set(cs.map((checkin) => checkin.kind));
+    setAreaSummaries([
+      { key: "tasks", label: "Tasks & Alerts", value: `${taskDone}/${tasks.data?.length ?? 0}`, detail: "top priorities complete today", to: "/", icon: CheckCircle2 },
+      { key: "leads", label: "CRM / Leads", value: String((leadsRes.count ?? 0) + (followRes.count ?? 0)), detail: `${leadsRes.count ?? 0} new, ${followRes.count ?? 0} follow-ups due`, to: "/crm", icon: Users },
+      { key: "content_items", label: "Content Calendar", value: String(contentRes.count ?? 0), detail: "items currently in production", to: "/content", icon: FileText },
+      { key: "business_projects", label: "Business Projects", value: String(activeProjects), detail: "active projects", to: "/integrations/notion/business_projects", icon: FolderKanban },
+      { key: "sops", label: "SOP Library", value: String(sopsRes.count ?? 0), detail: "procedures in the Knowledge Vault", to: "/vault", icon: BookOpenCheck },
+      { key: "revenue_entries", label: "Finance / Money", value: money(revMonth), detail: "revenue logged this month", to: "/revenue", icon: DollarSign },
+      { key: "scripts", label: "Sales Scripts", value: String(scriptsRes.count ?? 0), detail: "scripts ready to use", to: "/scripts", icon: ScrollText },
+      { key: "daily_checkins", label: "Daily Driver", value: `${checkinKinds.size}/2`, detail: "morning and evening check-ins today", to: "/", icon: Sunrise },
+      { key: "ai_commands", label: "AI Commands", value: String(commandsRes.count ?? 0), detail: "active approved commands", to: "/integrations/notion/ai_commands", icon: Bot },
+      { key: "automations", label: "Automations", value: String(automationRows.length), detail: automationErrors ? `${automationErrors} need attention` : "tracked agents and workflows", to: "/automations", icon: Workflow },
+    ]);
     setLoading(false);
   };
 
@@ -81,8 +136,10 @@ export default function Dashboard() {
   }, [params]);
 
   const bankConnected = useMemo(() => integrations.some(i => ["Square", "Shopify", "Stan Store"].includes(i.provider) && i.status === "Connected"), [integrations]);
-  const notion = useMemo(() => integrations.find(i => i.provider === "Notion"), [integrations]);
-  const notionStatus = (notion?.status ?? "Not Connected") as "Connected" | "Not Connected" | "Error";
+  const notionHealth = useMemo(() => getNotionHealth(notionMappings), [notionMappings]);
+  const notionStatus = notionHealth.status;
+  const lastNotionSync = notionHealth.lastSync;
+  const connectedNotionAreas = notionHealth.connectedCount;
 
   const recs = useMemo(() => {
     const list: { title: string; detail: string; to: string }[] = [];
@@ -112,14 +169,14 @@ export default function Dashboard() {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="font-display font-semibold text-sm">Notion sync status</h2>
-                <ConnectionBadge status={notionStatus} lastSync={notion?.last_sync_at} />
+                <ConnectionBadge status={notionStatus} lastSync={lastNotionSync} />
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
                 {notionStatus === "Connected"
-                  ? "Notion is connected. Sync claims still require a verified API response and audit record."
+                  ? `All ${NOTION_ENTITIES.length} Notion areas have a verified live connection.`
                   : notionStatus === "Error"
                     ? "Notion connection needs attention. Open setup to review the latest error."
-                    : "Notion not connected yet. Huey HQ is currently using its own secure database."}
+                    : `${connectedNotionAreas} of ${NOTION_ENTITIES.length} Notion areas are verified. Unconfigured areas remain clearly marked.`}
               </p>
             </div>
             <Button asChild size="sm" variant={notionStatus === "Connected" ? "outline" : "default"} className="shrink-0">
@@ -127,6 +184,18 @@ export default function Dashboard() {
             </Button>
           </div>
         </section>
+
+        {loadError && (
+          <section className="surface border-destructive/40 p-4 text-sm">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+              <div>
+                <div className="font-medium">Some live dashboard data could not load</div>
+                <div className="text-muted-foreground">{loadError}</div>
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* Metrics */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -192,6 +261,38 @@ export default function Dashboard() {
             )}
           </div>
         </div>
+
+        <section>
+          <div className="mb-3 flex items-end justify-between gap-3">
+            <div>
+              <h2 className="font-display text-sm font-semibold">Operating system</h2>
+              <p className="text-xs text-muted-foreground">Live Huey HQ records with per-area Notion verification.</p>
+            </div>
+            <Link to="/integrations/notion" className="shrink-0 text-xs underline underline-offset-2">Manage sync</Link>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            {areaSummaries.map((area) => {
+              const mapping = notionMappings.find((item) => item.entity === area.key);
+              const status = mapping?.status === "Connected" && mapping.verified_at
+                ? "Connected"
+                : mapping?.status === "Error"
+                  ? "Error"
+                  : "Not Connected";
+              const Icon = area.icon;
+              return (
+                <Link key={area.key} to={area.to} className="surface group min-h-36 p-4 transition-colors hover:border-gold/50">
+                  <div className="flex items-start justify-between gap-2">
+                    <Icon className="h-4 w-4 text-gold" />
+                    <ConnectionBadge status={status} lastSync={mapping?.last_sync_at} />
+                  </div>
+                  <div className="mt-4 text-2xl font-semibold tabular-nums">{loading ? "..." : area.value}</div>
+                  <div className="mt-1 text-sm font-medium">{area.label}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{area.detail}</div>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
 
         {/* Connection health */}
         <div className="surface p-4">
