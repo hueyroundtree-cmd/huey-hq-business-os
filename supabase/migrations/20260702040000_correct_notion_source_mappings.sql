@@ -10,8 +10,7 @@ SET
   last_sync_at = NULL,
   last_error = NULL
 WHERE provider = 'Notion'
-  AND entity = 'daily_checkins'
-  AND target_ref = '3720c11a-8316-8180-bcef-e923c077928b';
+  AND entity = 'daily_checkins';
 
 UPDATE public.sync_mappings
 SET
