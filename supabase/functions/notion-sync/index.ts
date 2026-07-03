@@ -30,6 +30,61 @@ const richText = (value: unknown) => [
   { type: "text", text: { content: String(value ?? "").slice(0, 2000) } },
 ];
 
+const paragraphBlock = (value: unknown) => ({
+  object: "block",
+  type: "paragraph",
+  paragraph: { rich_text: richText(value) },
+});
+
+const dailyPlanBlocks = (row: Record<string, any>) => {
+  const summary = row.summary_json && typeof row.summary_json === "object"
+    ? row.summary_json as Record<string, any>
+    : {};
+  const actions = summary.actions && typeof summary.actions === "object"
+    ? Object.entries(summary.actions)
+    : [];
+  const completed = summary.completed && typeof summary.completed === "object"
+    ? summary.completed as Record<string, boolean>
+    : {};
+  const actionLines = actions
+    .filter(([, value]) => typeof value === "string" && value.trim())
+    .map(([key, value]) => `${completed[key] ? "Done" : "Open"} — ${value}`);
+
+  return [
+    {
+      object: "block",
+      type: "heading_2",
+      heading_2: { rich_text: richText(`Huey HQ Daily Plan — ${row.check_date}`) },
+    },
+    ...actionLines.map(paragraphBlock),
+    ...(row.notes ? [paragraphBlock(`Notes: ${row.notes}`)] : []),
+    paragraphBlock(`Huey HQ ID: ${row.id}`),
+  ];
+};
+
+const crmSnapshotBlocks = (rows: Record<string, any>[]) => [
+  {
+    object: "block",
+    type: "heading_2",
+    heading_2: { rich_text: richText(`Huey HQ CRM Sync - ${new Date().toISOString()}`) },
+  },
+  ...rows.flatMap((row) => [
+    {
+      object: "block",
+      type: "heading_3",
+      heading_3: { rich_text: richText(row.business ? `${row.name} - ${row.business}` : row.name) },
+    },
+    paragraphBlock([
+      `Status: ${row.status || "Unknown"}`,
+      row.service_needed ? `Service: ${row.service_needed}` : null,
+      row.phone ? `Phone: ${row.phone}` : null,
+      row.email ? `Email: ${row.email}` : null,
+      row.next_follow_up_at ? `Next follow-up: ${row.next_follow_up_at}` : null,
+      `Huey HQ ID: ${row.id}`,
+    ].filter(Boolean).join(" | ")),
+  ]),
+];
+
 type SourceField = {
   source: string;
   notion: string;
@@ -319,6 +374,112 @@ Deno.serve(async (request) => {
       .maybeSingle();
     if (mappingError) throw mappingError;
     if (!mapping) throw new Error(`No Notion mapping exists for ${entity}.`);
+
+    if (entity === "daily_checkins") {
+      const page = await notionRequest(notionToken, `/pages/${mapping.target_ref}`);
+      const verifiedAt = new Date().toISOString();
+      await setMapping(entity, {
+        status: "Connected",
+        last_error: null,
+        verified_at: verifiedAt,
+      });
+
+      if (action === "verify") {
+        const detail = `Verified daily_checkins: live Notion page response received for ${page?.url || mapping.target_ref}.`;
+        await audit("success", detail, entity);
+        return json({ connected: true, verified: true, entity, detail });
+      }
+
+      let sourceQuery = supabase
+        .from(definition.table)
+        .select(definition.select);
+      if (recordId) {
+        sourceQuery = sourceQuery.eq("id", recordId);
+      } else {
+        sourceQuery = sourceQuery.eq("kind", "plan").order("created_at", { ascending: false }).limit(1);
+      }
+      const { data: rows, error: sourceError } = await sourceQuery;
+      if (sourceError) throw sourceError;
+      if (!rows?.length) throw new Error("No saved Daily Driver plan was found to push.");
+
+      const row = rows[0] as Record<string, any>;
+      await notionRequest(notionToken, `/blocks/${mapping.target_ref}/children`, {
+        method: "PATCH",
+        body: JSON.stringify({ children: dailyPlanBlocks(row) }),
+      });
+
+      const completedAt = new Date().toISOString();
+      const detail = `Daily Driver plan ${row.id} appended to the verified Notion page.`;
+      await setMapping(entity, {
+        status: "Connected",
+        last_error: null,
+        last_sync_at: completedAt,
+        verified_at: verifiedAt,
+      });
+      await setIntegration("Connected", null, completedAt);
+      await audit("success", detail, entity);
+      return json({
+        connected: true,
+        synced: true,
+        entity,
+        created: 1,
+        updated: 0,
+        skipped: 0,
+        failed: 0,
+        detail,
+      });
+    }
+
+    if (entity === "leads") {
+      const page = await notionRequest(notionToken, `/pages/${mapping.target_ref}`);
+      const verifiedAt = new Date().toISOString();
+      await setMapping(entity, {
+        status: "Connected",
+        last_error: null,
+        verified_at: verifiedAt,
+      });
+
+      if (action === "verify") {
+        const detail = `Verified leads: live Notion page response received for ${page?.url || mapping.target_ref}.`;
+        await audit("success", detail, entity);
+        return json({ connected: true, verified: true, entity, detail });
+      }
+
+      const { data: rows, error: sourceError } = await supabase
+        .from(definition.table)
+        .select(definition.select)
+        .order("updated_at", { ascending: true });
+      if (sourceError) throw sourceError;
+
+      const blocks = crmSnapshotBlocks((rows ?? []) as Record<string, any>[]);
+      for (let offset = 0; offset < blocks.length; offset += 100) {
+        await notionRequest(notionToken, `/blocks/${mapping.target_ref}/children`, {
+          method: "PATCH",
+          body: JSON.stringify({ children: blocks.slice(offset, offset + 100) }),
+        });
+      }
+
+      const completedAt = new Date().toISOString();
+      const detail = `CRM snapshot appended ${rows?.length ?? 0} leads to the verified Notion page.`;
+      await setMapping(entity, {
+        status: "Connected",
+        last_error: null,
+        last_sync_at: completedAt,
+        verified_at: verifiedAt,
+      });
+      await setIntegration("Connected", null, completedAt);
+      await audit("success", detail, entity);
+      return json({
+        connected: true,
+        synced: true,
+        entity,
+        created: rows?.length ?? 0,
+        updated: 0,
+        skipped: 0,
+        failed: 0,
+        detail,
+      });
+    }
 
     const fieldMap = (mapping.field_map || {}) as Record<string, string>;
     const dataSource = await notionRequest(notionToken, `/data_sources/${mapping.target_ref}`);
