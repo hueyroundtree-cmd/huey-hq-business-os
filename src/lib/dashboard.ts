@@ -38,3 +38,24 @@ export function getDailyDriverScore(topTaskStates: boolean[], actionStates: bool
     percent: possible ? Math.round((done / possible) * 100) : 0,
   };
 }
+
+export function buildDailyPlanPayload(
+  userId: string,
+  checkDate: string,
+  summary: Record<string, unknown>,
+) {
+  return {
+    user_id: userId,
+    kind: "plan",
+    check_date: checkDate,
+    summary_json: summary,
+  } as const;
+}
+
+export function buildDailyPlanSyncRequest(recordId: string) {
+  return {
+    action: "sync",
+    entity: "daily_checkins",
+    record_id: recordId,
+  } as const;
+}
