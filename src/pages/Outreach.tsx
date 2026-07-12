@@ -97,10 +97,10 @@ export default function Outreach() {
   const overdue = leads.filter((lead) =>
     lead.next_follow_up_at &&
     new Date(lead.next_follow_up_at) < now &&
-    !["Lost", "Completed"].includes(lead.status)
+    !["Closed/Lost", "Completed"].includes(lead.status)
   );
   const waitingQuote = leads.filter((lead) => lead.status === "Contacted" && !lead.quote_amount);
-  const waitingDeposit = leads.filter((lead) => lead.status === "Quote Sent" && !lead.deposit);
+  const waitingDeposit = leads.filter((lead) => lead.status === "Quoted" && !lead.deposit);
   const waitingReview = leads.filter((lead) => lead.status === "Completed");
 
   const touchesForSource = (group: string) => {

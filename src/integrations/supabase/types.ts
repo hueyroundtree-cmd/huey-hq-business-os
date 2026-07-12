@@ -176,6 +176,27 @@ export type Database = {
         }
         Relationships: []
       }
+      business_units: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          slug: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          slug: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          slug?: string
+        }
+        Relationships: []
+      }
       content_items: {
         Row: {
           analytics_json: Json
@@ -404,69 +425,152 @@ export type Database = {
       }
       leads: {
         Row: {
+          appointment_status: string
+          address_service_area: string | null
           booking_at: string | null
           business: string | null
+          business_unit_id: string
+          city: string | null
+          contact_date: string | null
+          contact_method: string | null
+          contacted_by: string | null
           created_at: string
+          date_added: string | null
           deposit: number | null
+          deposit_status: string
           email: string | null
+          email_body: string | null
+          email_sent_at: string | null
+          email_subject: string | null
           id: string
+          industry: string | null
           last_contact_at: string | null
+          lead_score: number
           name: string
+          next_action: string | null
           next_follow_up_at: string | null
           notes: string | null
+          outreach_status: string
           phone: string | null
+          priority: string | null
+          crm_id: string | null
           estimated_value: number | null
           lead_type: string
           quote_amount: number | null
           service_needed: string | null
           source: string | null
+          source_record_id: string | null
+          source_url: string | null
           status: Database["public"]["Enums"]["lead_status"]
+          text_message_template: string | null
+          text_sent_at: string | null
           updated_at: string
           user_id: string
+          verification_source: string | null
+          vehicle: string | null
+          zoho_email_sent: boolean
         }
         Insert: {
+          appointment_status?: string
+          address_service_area?: string | null
           booking_at?: string | null
           business?: string | null
+          business_unit_id?: string
+          city?: string | null
+          contact_date?: string | null
+          contact_method?: string | null
+          contacted_by?: string | null
           created_at?: string
+          date_added?: string | null
           deposit?: number | null
+          deposit_status?: string
           email?: string | null
+          email_body?: string | null
+          email_sent_at?: string | null
+          email_subject?: string | null
           id?: string
+          industry?: string | null
           last_contact_at?: string | null
+          lead_score?: number
           name: string
+          next_action?: string | null
           next_follow_up_at?: string | null
           notes?: string | null
+          outreach_status?: string
           phone?: string | null
+          priority?: string | null
+          crm_id?: string | null
           estimated_value?: number | null
           lead_type?: string
           quote_amount?: number | null
           service_needed?: string | null
           source?: string | null
+          source_record_id?: string | null
+          source_url?: string | null
           status?: Database["public"]["Enums"]["lead_status"]
+          text_message_template?: string | null
+          text_sent_at?: string | null
           updated_at?: string
           user_id: string
+          verification_source?: string | null
+          vehicle?: string | null
+          zoho_email_sent?: boolean
         }
         Update: {
+          appointment_status?: string
+          address_service_area?: string | null
           booking_at?: string | null
           business?: string | null
+          business_unit_id?: string
+          city?: string | null
+          contact_date?: string | null
+          contact_method?: string | null
+          contacted_by?: string | null
           created_at?: string
+          date_added?: string | null
           deposit?: number | null
+          deposit_status?: string
           email?: string | null
+          email_body?: string | null
+          email_sent_at?: string | null
+          email_subject?: string | null
           id?: string
+          industry?: string | null
           last_contact_at?: string | null
+          lead_score?: number
           name?: string
+          next_action?: string | null
           next_follow_up_at?: string | null
           notes?: string | null
+          outreach_status?: string
           phone?: string | null
+          priority?: string | null
+          crm_id?: string | null
           estimated_value?: number | null
           lead_type?: string
           quote_amount?: number | null
           service_needed?: string | null
           source?: string | null
+          source_record_id?: string | null
+          source_url?: string | null
           status?: Database["public"]["Enums"]["lead_status"]
+          text_message_template?: string | null
+          text_sent_at?: string | null
           updated_at?: string
           user_id?: string
+          verification_source?: string | null
+          vehicle?: string | null
+          zoho_email_sent?: boolean
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "leads_business_unit_id_fkey"
+            columns: ["business_unit_id"]
+            isOneToOne: false
+            referencedRelation: "business_units"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       operations_events: {
         Row: {
@@ -722,7 +826,24 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      crm_activity: {
+        Row: {
+          activity_source: string
+          created_at: string
+          detail: string | null
+          event_type: string
+          id: string
+          lead_id: string | null
+          metadata: Json
+          occurred_at: string
+          source: string
+          title: string
+          user_id: string
+        }
+        Insert: never
+        Update: never
+        Relationships: []
+      }
     }
     Functions: {
       [_ in never]: never

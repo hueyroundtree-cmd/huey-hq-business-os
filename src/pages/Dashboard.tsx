@@ -67,6 +67,8 @@ export default function Dashboard() {
   const [revWeek, setRevWeek] = useState(0);
   const [revMonth, setRevMonth] = useState(0);
   const [newLeads, setNewLeads] = useState(0);
+  const [contactedToday, setContactedToday] = useState(0);
+  const [appointmentsScheduled, setAppointmentsScheduled] = useState(0);
   const [followUpsDue, setFollowUpsDue] = useState(0);
   const [jobsToday, setJobsToday] = useState(0);
   const [billsDueTotal, setBillsDueTotal] = useState(0);
@@ -99,6 +101,7 @@ export default function Dashboard() {
     const [
       rev, leadsRes, followRes, jobsRes, billsRes, contentRes, checkins, integ, tasks,
       mappingsRes, projectsRes, sopsRes, scriptsRes, commandsRes, automationsRes, pipelineRes,
+      contactedTodayRes, appointmentsRes,
     ] = await Promise.all([
       supabase.from("revenue_entries").select("amount, entry_date").gte("entry_date", month),
       supabase.from("leads").select("id", { count: "exact", head: true }).eq("status", "New Lead"),
@@ -116,11 +119,14 @@ export default function Dashboard() {
       (supabase.from("ai_commands") as any).select("id", { count: "exact", head: true }).eq("active", true),
       supabase.from("automations").select("id, status"),
       supabase.from("leads").select("id,name,business,status,estimated_value,next_follow_up_at"),
+      supabase.from("lead_activities").select("id", { count: "exact", head: true }).gte("created_at", `${today}T00:00:00Z`),
+      supabase.from("leads").select("id", { count: "exact", head: true }).eq("status", "Booked"),
     ]);
 
     const responses = [
       rev, leadsRes, followRes, jobsRes, billsRes, contentRes, checkins, integ, tasks,
       mappingsRes, projectsRes, sopsRes, scriptsRes, commandsRes, automationsRes, pipelineRes,
+      contactedTodayRes, appointmentsRes,
     ];
     const firstError = responses.find((response) => response.error)?.error;
     if (firstError) setLoadError(firstError.message);
@@ -130,6 +136,8 @@ export default function Dashboard() {
     setRevWeek(entries.filter((e) => e.entry_date >= week).reduce((s, e) => s + Number(e.amount), 0));
     setRevMonth(entries.reduce((s, e) => s + Number(e.amount), 0));
     setNewLeads(leadsRes.count ?? 0);
+    setContactedToday(contactedTodayRes.count ?? 0);
+    setAppointmentsScheduled(appointmentsRes.count ?? 0);
     setFollowUpsDue(followRes.count ?? 0);
     setJobsToday(jobsRes.count ?? 0);
     setBillsDueTotal((billsRes.data ?? []).reduce((s, b) => s + Number(b.amount), 0));
@@ -192,15 +200,16 @@ export default function Dashboard() {
     const greeting = hour < 12 ? "Good Morning" : hour < 18 ? "Good Afternoon" : "Good Evening";
     const completedTop = topTasks.filter((task) => task.done).length;
     const topTaskScore = topTasks.length ? (completedTop / topTasks.length) * 45 : 0;
-    const score = Math.round(
+    const score = Math.min(100, Math.round(
       topTaskScore +
       (morning ? 15 : 0) +
       (evening ? 15 : 0) +
       (revToday > 0 ? 10 : 0) +
       (jobsToday > 0 ? 5 : 0) +
       (newLeads > 0 ? 5 : 0) +
+      (contactedToday > 0 ? 5 : 0) +
       (contentDue > 0 ? 5 : 0)
-    );
+    ));
     const grade =
       score >= 90 ? "Excellent work." :
       score >= 70 ? "Strong progress." :
@@ -208,7 +217,7 @@ export default function Dashboard() {
       "Start with today's first verified action.";
     const calendar = integrations.find((item) => item.provider === "Google Calendar");
     return { greeting, score, grade, calendarConnected: calendar?.status === "Connected" };
-  }, [topTasks, morning, evening, revToday, jobsToday, newLeads, contentDue, integrations]);
+  }, [topTasks, morning, evening, revToday, jobsToday, newLeads, contactedToday, contentDue, integrations]);
 
   const dailyPlan = useMemo<DailyPlan>(() => {
     const summary = dailyPlanRecord?.summary_json as Partial<DailyPlan> | null;
@@ -323,8 +332,10 @@ export default function Dashboard() {
                 <MissionMetric label="Cash Available" value={cash === null ? "Verify" : money(cash)} icon={DollarSign} />
                 <MissionMetric label="Jobs" value={String(jobsToday)} icon={Wrench} />
                 <MissionMetric label="Leads" value={String(newLeads)} icon={Users} />
+                <MissionMetric label="Appointments" value={String(appointmentsScheduled)} icon={CalendarPlus} />
                 <MissionMetric label="Calendar" value={missionControl.calendarConnected ? "Connected" : "Not connected"} icon={CalendarDays} />
                 <MissionMetric label="Follow Ups" value={String(followUpsDue)} icon={Bell} />
+                <MissionMetric label="Contacts Today" value={String(contactedToday)} icon={Send} />
                 <MissionMetric label="Videos" value={String(contentDue)} icon={Video} />
                 <MissionMetric label="Top 3 Done" value={`${topTasks.filter((task) => task.done).length}/${topTasks.length || 3}`} icon={CheckCircle2} />
               </div>
