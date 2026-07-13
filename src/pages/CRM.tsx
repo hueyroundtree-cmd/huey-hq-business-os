@@ -181,6 +181,16 @@ const mailtoHref = (lead: Lead) => {
 
 const smsHref = (lead: Lead) => `sms:${lead.phone ?? ""}${lead.text_message_template ? `?&body=${encodeURIComponent(lead.text_message_template)}` : ""}`;
 
+const confirmManualEmailSend = (lead: Lead, composer: EmailComposer) =>
+  window.confirm([
+    `Send this Zoho email from ${ZOHO_PRIMARY_SENDER}?`,
+    "",
+    `To: ${composer.toAddress || lead.email || "No recipient"}`,
+    `Subject: ${composer.subject || "No subject"}`,
+    "",
+    "Huey must review the editable message before sending. No prospect email is sent until you confirm here.",
+  ].join("\n"));
+
 export default function CRM() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -384,6 +394,11 @@ export default function CRM() {
     loadEmailHistory(lead.id);
   };
 
+  const openEmailComposer = (lead: Lead) => {
+    openLead(lead);
+    toast.success("Zoho composer opened", { description: "Review the recipient, subject, and body before sending." });
+  };
+
   const openContactWorkflow = (lead: Lead) => {
     setContactLead(lead);
     setContactDraft(buildContactDraft(lead));
@@ -559,6 +574,7 @@ export default function CRM() {
 
   const handleSendZohoEmail = async (lead: Lead, composer: EmailComposer) => {
     if (!lead.id) return toast.error("Save the lead before sending.");
+    if (!confirmManualEmailSend(lead, composer)) return toast.info("Zoho send canceled");
     setEmailBusy(true);
     try {
       const result = await sendZohoEmail({
@@ -775,7 +791,7 @@ export default function CRM() {
                       {isOverdue(lead) && <AlertCircle className="mr-1 inline h-3 w-3" />}
                       {lead.next_follow_up_at ? new Date(lead.next_follow_up_at).toLocaleDateString() : "-"}
                     </td>
-                    <td className="px-3 py-2"><ContactActions lead={lead} logContact={openContactWorkflow} updateConcordAction={updateConcordAction} /></td>
+                    <td className="px-3 py-2"><ContactActions lead={lead} logContact={openContactWorkflow} openEmailComposer={openEmailComposer} updateConcordAction={updateConcordAction} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -860,10 +876,12 @@ function buildEmailComposer(lead?: Partial<Lead>): EmailComposer {
 function ContactActions({
   lead,
   logContact,
+  openEmailComposer,
   updateConcordAction,
 }: {
   lead: Lead;
   logContact: (lead: Lead) => void;
+  openEmailComposer: (lead: Lead) => void;
   updateConcordAction: (lead: Lead, action: "email_sent" | "text_sent" | "follow_up" | "booked") => void;
 }) {
   const isConcord = isConcordLead(lead);
@@ -872,7 +890,17 @@ function ContactActions({
       {lead.source_url && <a title="Website/source" href={lead.source_url} target="_blank" rel="noreferrer" className="rounded border p-2 hover:bg-muted"><ExternalLink className="h-4 w-4" /></a>}
       {lead.phone && <a title="Call lead" href={`tel:${lead.phone}`} className="rounded border p-2 hover:bg-muted"><Phone className="h-4 w-4" /></a>}
       {lead.phone && <a title="Text lead" href={smsHref(lead)} className="rounded border p-2 hover:bg-muted"><MessageSquare className="h-4 w-4" /></a>}
-      {lead.email && <a title="Email lead" href={mailtoHref(lead)} className="rounded border p-2 hover:bg-muted"><Mail className="h-4 w-4" /></a>}
+      {lead.email && (
+        <button
+          type="button"
+          title="Open Zoho composer"
+          aria-label="Open Zoho composer"
+          onClick={() => openEmailComposer(lead)}
+          className="rounded border p-2 hover:bg-muted"
+        >
+          <Mail className="h-4 w-4" />
+        </button>
+      )}
       {isConcord && lead.email && <Button size="sm" variant="outline" onClick={() => updateConcordAction(lead, "email_sent")}>Email Sent</Button>}
       {isConcord && lead.phone && <Button size="sm" variant="outline" onClick={() => updateConcordAction(lead, "text_sent")}>Text Sent</Button>}
       <Button size="sm" variant="outline" onClick={() => logContact(lead)}>
@@ -987,7 +1015,7 @@ function LeadDialog({
             <div className="mt-3 flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onClick={() => copyText("Email subject", current.email_subject)}><Copy className="mr-1.5 h-3.5 w-3.5" />Copy subject</Button>
               <Button size="sm" variant="outline" onClick={() => copyText("Email body", current.email_body)}><Copy className="mr-1.5 h-3.5 w-3.5" />Copy email</Button>
-              {current.email && <Button asChild size="sm" variant="outline"><a href={mailtoHref(current as Lead)}><Mail className="mr-1.5 h-3.5 w-3.5" />Open email</a></Button>}
+              {current.email && <Button asChild size="sm" variant="outline"><a href={mailtoHref(current as Lead)}><Mail className="mr-1.5 h-3.5 w-3.5" />Open Default Email App</a></Button>}
               {current.phone && <Button asChild size="sm" variant="outline"><a href={smsHref(current as Lead)}><MessageSquare className="mr-1.5 h-3.5 w-3.5" />Open text</a></Button>}
               {current.phone && <Button asChild size="sm" variant="outline"><a href={`tel:${current.phone}`}><Phone className="mr-1.5 h-3.5 w-3.5" />Call</a></Button>}
               {current.source_url && <Button asChild size="sm" variant="outline"><a href={current.source_url} target="_blank" rel="noreferrer"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Website</a></Button>}
@@ -1035,6 +1063,11 @@ function LeadDialog({
               <Button asChild size="sm" variant="outline">
                 <a href="https://mail.zoho.com" target="_blank" rel="noreferrer"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Open in Zoho</a>
               </Button>
+              {current.email && (
+                <Button asChild size="sm" variant="ghost">
+                  <a href={mailtoHref(current as Lead)}><Mail className="mr-1.5 h-3.5 w-3.5" />Open Default Email App</a>
+                </Button>
+              )}
               <Button size="sm" variant="outline" onClick={() => onManualReplySync(current as Lead)} disabled={emailBusy}>
                 Manual reply sync
               </Button>
