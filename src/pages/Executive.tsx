@@ -2,6 +2,10 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { PageHeader } from "@/components/PageHeader";
 import { relTime } from "@/lib/format";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { extractClaudeText } from "@/lib/claude";
+import { toast } from "sonner";
 
 const DEPTS = [
   { key: "Executive Office", brief: "Oversight, priorities, weekly review." },
@@ -14,9 +18,30 @@ const DEPTS = [
   { key: "Automation", brief: "Registered automations & health." },
 ];
 
+type ExecutiveStats = {
+  overdueFollowups: number;
+  billsUnpaidCount: number;
+  totalLeads: number;
+  contentInFlight: number;
+  activeAutos: number;
+  autoTotal: number;
+  revNoProof: number;
+};
+
 export default function Executive() {
-  const [stats, setStats] = useState<any>({});
+  const [stats, setStats] = useState<ExecutiveStats>({
+    overdueFollowups: 0,
+    billsUnpaidCount: 0,
+    totalLeads: 0,
+    contentInFlight: 0,
+    activeAutos: 0,
+    autoTotal: 0,
+    revNoProof: 0,
+  });
   const [lastSync, setLastSync] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [asking, setAsking] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -34,7 +59,7 @@ export default function Executive() {
         billsUnpaidCount: (billsRes.data ?? []).length,
         totalLeads: leadsRes.count ?? 0,
         contentInFlight: contentRes.count ?? 0,
-        activeAutos: (autoRes.data ?? []).filter((a: any) => a.status === "Active").length,
+        activeAutos: (autoRes.data ?? []).filter((automation) => automation.status === "Active").length,
         autoTotal: (autoRes.data ?? []).length,
         revNoProof: revRes.count ?? 0,
       });
@@ -61,12 +86,58 @@ export default function Executive() {
     }
   };
 
+  const askClaude = async () => {
+    const value = prompt.trim();
+    if (!value) return toast.error("Enter a question first.");
+    setAsking(true);
+    setAnswer("");
+    const { data, error } = await supabase.functions.invoke("ask-claude", {
+      body: { prompt: value },
+    });
+    setAsking(false);
+    if (error || data?.error) {
+      return toast.error("Claude AI needs attention", {
+        description: data?.error ?? error?.message ?? "No verified response returned.",
+      });
+    }
+    const text = extractClaudeText(data);
+    if (!text) return toast.error("Claude returned no readable response.");
+    setAnswer(text);
+  };
+
   return (
     <div>
-      <PageHeader title="AI Executive Team" description="Deterministic recommendations from your own data. AI provider Not Connected — proposed actions require your review." />
-      <div className="p-4 md:p-6 grid md:grid-cols-2 lg:grid-cols-4 gap-3">
-        {DEPTS.map(d => (
-          <div key={d.key} className="surface p-4 flex flex-col gap-2">
+      <PageHeader title="AI Executive Team" description="Data-derived recommendations plus one secure Claude action through Supabase." />
+      <div className="p-4 md:p-6 space-y-4">
+        <section className="surface p-4 space-y-3">
+          <div>
+            <h2 className="font-display font-semibold">Ask Claude securely</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Your browser calls an authenticated Supabase Edge Function. The Anthropic key stays server-side.
+            </p>
+          </div>
+          <Textarea
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            placeholder="Ask for one concise recommendation from the information you provide."
+            rows={3}
+            maxLength={4000}
+          />
+          <div className="flex justify-end">
+            <Button onClick={askClaude} disabled={asking || !prompt.trim()}>
+              {asking ? "Asking Claude..." : "Ask Claude"}
+            </Button>
+          </div>
+          {answer && (
+            <div className="rounded-md border bg-muted/30 p-4 text-sm whitespace-pre-wrap">
+              {answer}
+            </div>
+          )}
+        </section>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
+          {DEPTS.map(d => (
+            <div key={d.key} className="surface p-4 flex flex-col gap-2">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <div className="font-medium text-sm">{d.key}</div>
@@ -79,8 +150,9 @@ export default function Executive() {
             <div className="text-[10px] text-muted-foreground/80 mt-auto pt-2 border-t">
               Updated {relTime(lastSync)} · <span className="uppercase tracking-wide">AI: Not Connected</span>
             </div>
-          </div>
-        ))}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
