@@ -31,6 +31,7 @@ import {
   DEFAULT_SCORE_SETTINGS,
   aggregateDailyProgress,
   buildSnapshotUpsertPayload,
+  DEFAULT_BUSINESS_UNIT,
   getCurrentExecutionStreak,
   scoreDailyProgress,
   type DailyProgressInputs,
@@ -87,14 +88,14 @@ type DailyCheckinRow = {
   created_at?: string | null;
 };
 type ProgressSnapshotSummaryRow = Record<string, unknown> & {
-  business_date: string;
+  progress_date: string;
+  business_unit?: string | null;
   daily_score?: number | string | null;
   emails_sent?: number | string | null;
   texts_sent?: number | string | null;
-  calls_completed?: number | string | null;
-  contact_forms_submitted?: number | string | null;
-  follow_ups_completed?: number | string | null;
-  jobs_booked?: number | string | null;
+  calls_made?: number | string | null;
+  followups_completed?: number | string | null;
+  bookings_created?: number | string | null;
 };
 type TopPriorityTask = { id?: string; title: string; done?: boolean; is_top_priority?: boolean };
 type EndDaySnapshot = {
@@ -187,7 +188,7 @@ export default function Dashboard() {
       supabase.from("leads").select("id,name,business,status,estimated_value,next_follow_up_at"),
       supabase.from("lead_activities").select("id", { count: "exact", head: true }).gte("created_at", `${today}T00:00:00Z`),
       supabase.from("leads").select("id", { count: "exact", head: true }).eq("status", "Booked"),
-      dashboardDb.from<ProgressSnapshotSummaryRow>("daily_performance_snapshots").select("business_date,daily_score,emails_sent,texts_sent,calls_completed,contact_forms_submitted,follow_ups_completed,jobs_booked").order("business_date", { ascending: false }).limit(30),
+      dashboardDb.from<ProgressSnapshotSummaryRow>("daily_performance_snapshots").select("progress_date,business_unit,daily_score,emails_sent,texts_sent,calls_made,followups_completed,bookings_created").eq("business_unit", DEFAULT_BUSINESS_UNIT).order("progress_date", { ascending: false }).limit(30),
     ]);
 
     const responses = [
@@ -206,13 +207,13 @@ export default function Dashboard() {
     setContactedToday(contactedTodayRes.count ?? 0);
     setAppointmentsScheduled(appointmentsRes.count ?? 0);
     const progressRows = rowsFrom<ProgressSnapshotSummaryRow>(progressRes.data);
-    const todayProgress = progressRows.find((row) => row.business_date === today);
+    const todayProgress = progressRows.find((row) => row.progress_date === today);
     setProgressSummary({
-      dailyScore: todayProgress?.daily_score ?? null,
-      outreachCompleted: Number(todayProgress?.emails_sent ?? 0) + Number(todayProgress?.texts_sent ?? 0) + Number(todayProgress?.calls_completed ?? 0) + Number(todayProgress?.contact_forms_submitted ?? 0),
-      followUpsCompleted: Number(todayProgress?.follow_ups_completed ?? 0),
-      jobsBooked: Number(todayProgress?.jobs_booked ?? 0),
-      currentStreak: getCurrentExecutionStreak(progressRows.map((row) => ({ business_date: row.business_date, daily_score: Number(row.daily_score ?? 0) }))),
+      dailyScore: todayProgress ? Number(todayProgress.daily_score ?? 0) : null,
+      outreachCompleted: Number(todayProgress?.emails_sent ?? 0) + Number(todayProgress?.texts_sent ?? 0) + Number(todayProgress?.calls_made ?? 0),
+      followUpsCompleted: Number(todayProgress?.followups_completed ?? 0),
+      jobsBooked: Number(todayProgress?.bookings_created ?? 0),
+      currentStreak: getCurrentExecutionStreak(progressRows.map((row) => ({ progress_date: row.progress_date, daily_score: Number(row.daily_score ?? 0) }))),
     });
     setFollowUpsDue(followRes.count ?? 0);
     setJobsToday(jobsRes.count ?? 0);
@@ -1045,7 +1046,7 @@ function EndDayDialog({ open, onClose, onSaved, dailyDriver }: EndDayDialogProps
       const [rev, tasks, leads, activities, emails, jobs, content, checkins] = await Promise.all([
         supabase.from("revenue_entries").select("id,entry_date,stream,amount").eq("entry_date", today),
         supabase.from("tasks").select("id, title, done, is_top_priority").eq("for_date", today),
-        supabase.from("leads").select("id,created_at,updated_at,date_added,status,booking_at,business_unit_id,source,city,contact_method,contact_date,email_sent_at,text_sent_at,last_contact_at,outreach_status,quote_amount,appointment_status").gte("created_at", `${today}T00:00:00Z`),
+        supabase.from("leads").select("id,created_at,updated_at,date_added,status,booking_at,business_unit_id,source,city,contact_method,contact_date,email_sent_at,text_sent_at,last_contact_at,outreach_status,quote_amount,estimated_value,deposit,deposit_status,appointment_status").gte("created_at", `${today}T00:00:00Z`),
         supabase.from("lead_activities").select("id,lead_id,kind,detail,created_at").gte("created_at", `${today}T00:00:00Z`),
         dashboardDb.from("crm_email_messages").select("id,lead_id,direction,status,sent_at,replied_at,created_at").gte("created_at", `${today}T00:00:00Z`),
         supabase.from("jobs").select("id,status,scheduled_at,created_at,updated_at").gte("created_at", `${today}T00:00:00Z`),
@@ -1060,13 +1061,13 @@ function EndDayDialog({ open, onClose, onSaved, dailyDriver }: EndDayDialogProps
         jobs: jobs.data ?? [],
         contentItems: content.data ?? [],
         dailyCheckins: checkins.data ?? [],
-      }, today, DEFAULT_SCORE_SETTINGS);
+      }, today, DEFAULT_SCORE_SETTINGS, { businessUnitId: "11111111-1111-4111-8111-111111111111" });
       setSnapshot({
         metrics,
-        revenue: metrics.total_income,
-        outreach: metrics.emails_sent + metrics.texts_sent + metrics.calls_completed + metrics.contact_forms_submitted,
-        bookings: metrics.jobs_booked,
-        completedJobs: metrics.jobs_completed,
+        revenue: metrics.revenue_collected,
+        outreach: metrics.emails_sent + metrics.texts_sent + metrics.calls_made,
+        bookings: metrics.bookings_created,
+        completedJobs: metrics.appointments_completed,
         completedTasks: (tasks.data ?? []).filter(t => t.done).length,
         totalTasks: (tasks.data ?? []).length,
         incompleteTop: (tasks.data ?? []).filter((task) => task.is_top_priority && !task.done),
@@ -1111,14 +1112,16 @@ function EndDayDialog({ open, onClose, onSaved, dailyDriver }: EndDayDialogProps
           tomorrow_first_actions: tomorrowActions.filter(Boolean),
           finalized_at: new Date().toISOString(),
         }),
-        { onConflict: "user_id,business_date" },
+        { onConflict: "user_id,business_unit,progress_date" },
       ),
     ]);
     if (!checkinResult.error && !snapshotResult.error && carry && snapshot?.incompleteTop?.length) {
-      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
-      const iso = tomorrow.toISOString().slice(0, 10);
+      const iso = todayISO();
+      const tomorrow = new Date(`${iso}T12:00:00Z`);
+      tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+      const forDate = tomorrow.toISOString().slice(0, 10);
       await supabase.from("tasks").insert(snapshot.incompleteTop.map((task) => ({
-        user_id: uid, title: task.title, is_top_priority: true, for_date: iso,
+        user_id: uid, title: task.title, is_top_priority: true, for_date: forDate,
       })));
     }
     const error = checkinResult.error ?? snapshotResult.error;
@@ -1140,7 +1143,7 @@ function EndDayDialog({ open, onClose, onSaved, dailyDriver }: EndDayDialogProps
       <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Close Day</DialogTitle>
-          <DialogDescription>Finalize today's snapshot without locking out late corrections.</DialogDescription>
+          <DialogDescription>Finalize today's snapshot. Finalized historical days stay immutable.</DialogDescription>
         </DialogHeader>
         {snapshot && (
           <div className="grid grid-cols-2 gap-2 text-sm text-muted-foreground">
