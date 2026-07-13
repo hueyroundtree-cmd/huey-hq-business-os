@@ -2,7 +2,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Users, DollarSign, FileText, ScrollText, Bot, Zap,
   BookOpen, Map, Settings, Plug, LogOut, Menu, Sun, Moon, PlusCircle,
-  BriefcaseBusiness, PackageOpen, Activity, HeartPulse, Search
+  BriefcaseBusiness, PackageOpen, Activity, HeartPulse, Search, TrendingUp
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { useState } from "react";
 const NAV = [
   { to: "/", label: "Mission Control", icon: LayoutDashboard, end: true },
   { to: "/command-center", label: "Command Center", icon: BriefcaseBusiness },
+  { to: "/progress", label: "Progress", icon: TrendingUp },
   { to: "/module-store", label: "Module Store", icon: PackageOpen },
   { to: "/outreach", label: "Outreach Command", icon: Users },
   { to: "/timeline", label: "Operations Timeline", icon: Activity },
@@ -32,8 +33,8 @@ const NAV = [
 const MOBILE_NAV = [
   NAV.find((item) => item.to === "/")!,
   NAV.find((item) => item.to === "/command-center")!,
+  NAV.find((item) => item.to === "/progress")!,
   NAV.find((item) => item.to === "/outreach")!,
-  NAV.find((item) => item.to === "/content")!,
   NAV.find((item) => item.to === "/revenue")!,
 ];
 
