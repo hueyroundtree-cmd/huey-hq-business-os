@@ -6,7 +6,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Download, ExternalLink, Server, Trash2 } from "lucide-react";
+import { Download, ExternalLink, Mail, Server, Trash2 } from "lucide-react";
+import {
+  ZOHO_PRIMARY_SENDER,
+  ZOHO_SCOPES,
+  disconnectZoho,
+  getZohoAuthorizeUrl,
+  getZohoStatus,
+  sendZohoEmail,
+  type ZohoConnectionStatus,
+} from "@/lib/zohoMail";
 
 const PRODUCTION_URL = "https://hueyroundtree-cmd.github.io/huey-hq-business-os/";
 const SUPABASE_PROJECT_ID = "mqmskpdduwbiypepzkvc";
@@ -16,13 +25,80 @@ export default function Settings() {
   const [displayName, setDisplayName] = useState("");
   const [business, setBusiness] = useState("");
   const [busy, setBusy] = useState(false);
+  const [zoho, setZoho] = useState<ZohoConnectionStatus | null>(null);
+  const [zohoBusy, setZohoBusy] = useState(false);
+  const [testAddress, setTestAddress] = useState("");
 
   useEffect(() => {
     if (!user) return;
     supabase.from("profiles").select("*").eq("id", user.id).maybeSingle().then(({ data }) => {
       if (data) { setDisplayName(data.display_name ?? ""); setBusiness(data.business_name ?? ""); }
     });
+    refreshZohoStatus();
   }, [user]);
+
+  const refreshZohoStatus = async () => {
+    try {
+      setZoho(await getZohoStatus());
+    } catch (error) {
+      setZoho({
+        status: "Needs Setup",
+        connectedAddress: null,
+        accountId: null,
+        lastSync: null,
+        lastError: error instanceof Error ? error.message : String(error),
+        connectedAt: null,
+        disconnectedAt: null,
+        sender: ZOHO_PRIMARY_SENDER,
+        scopes: ZOHO_SCOPES,
+      });
+    }
+  };
+
+  const connectZoho = async () => {
+    setZohoBusy(true);
+    try {
+      const result = await getZohoAuthorizeUrl();
+      window.location.href = result.url;
+    } catch (error) {
+      toast.error("Zoho connect needs setup", { description: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setZohoBusy(false);
+    }
+  };
+
+  const handleDisconnectZoho = async () => {
+    setZohoBusy(true);
+    try {
+      await disconnectZoho();
+      toast.success("Zoho Mail disconnected");
+      await refreshZohoStatus();
+    } catch (error) {
+      toast.error("Disconnect failed", { description: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setZohoBusy(false);
+    }
+  };
+
+  const sendZohoTest = async () => {
+    if (!testAddress || !testAddress.includes("@")) return toast.error("Enter a test email address first.");
+    setZohoBusy(true);
+    try {
+      await sendZohoEmail({
+        leadId: "",
+        toAddress: testAddress,
+        subject: "Great Freight Mobile Detailing — Zoho test",
+        body: "This is a user-controlled Zoho Mail connection test from Huey HQ CRM. No prospect was contacted.",
+        confirmDuplicate: true,
+      });
+      toast.success("Test email sent", { description: `Sent only to ${testAddress}` });
+      await refreshZohoStatus();
+    } catch (error) {
+      toast.error("Test email failed", { description: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setZohoBusy(false);
+    }
+  };
 
   const saveProfile = async () => {
     if (!user) return;
@@ -34,7 +110,7 @@ export default function Settings() {
   };
 
   const exportData = async () => {
-    const tables = ["leads","revenue_entries","daily_checkins","tasks","scripts","content_items","business_projects","ai_commands","automations","integrations","sync_mappings","sync_audit","knowledge_docs","bills","jobs","lead_activities","operations_events"];
+    const tables = ["leads","crm_email_messages","revenue_entries","daily_checkins","tasks","scripts","content_items","business_projects","ai_commands","automations","integrations","sync_mappings","sync_audit","knowledge_docs","bills","jobs","lead_activities","operations_events"];
     const bundle: Record<string, any> = {};
     for (const t of tables) {
       const { data } = await supabase.from(t as any).select("*");
@@ -84,6 +160,57 @@ export default function Settings() {
               <dd>Design and prototyping only. Not production hosting.</dd>
             </div>
           </dl>
+        </div>
+
+        <div className="surface p-4 space-y-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="font-medium text-sm flex items-center gap-2"><Mail className="h-4 w-4" />Zoho Mail</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Secure OAuth connection for CRM email drafting and manual sending. Tokens are stored server-side only.
+              </p>
+            </div>
+            <span className="rounded-sm border px-2 py-1 text-xs">{zoho?.status ?? "Needs Setup"}</span>
+          </div>
+          <dl className="grid gap-3 text-xs">
+            <div>
+              <dt className="text-muted-foreground">Required sender</dt>
+              <dd className="font-mono break-all">{ZOHO_PRIMARY_SENDER}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Connected address</dt>
+              <dd>{zoho?.connectedAddress ?? "Not connected"}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">OAuth scopes</dt>
+              <dd className="font-mono break-all">{ZOHO_SCOPES.join(", ")}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Last sync</dt>
+              <dd>{zoho?.lastSync ? new Date(zoho.lastSync).toLocaleString() : "Never"}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Last error</dt>
+              <dd>{zoho?.lastError ?? "None"}</dd>
+            </div>
+          </dl>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={connectZoho} disabled={zohoBusy}>{zoho?.status === "Verified Live" ? "Reconnect" : "Connect"}</Button>
+            <Button size="sm" variant="outline" onClick={refreshZohoStatus} disabled={zohoBusy}>Refresh Status</Button>
+            <Button size="sm" variant="outline" onClick={handleDisconnectZoho} disabled={zohoBusy}>Disconnect</Button>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+            <Input
+              type="email"
+              value={testAddress}
+              onChange={(event) => setTestAddress(event.target.value)}
+              placeholder="User-controlled test address only"
+            />
+            <Button size="sm" variant="outline" onClick={sendZohoTest} disabled={zohoBusy || zoho?.status !== "Verified Live"}>Send test email</Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Test email is disabled until Zoho is connected and must be sent to a manually entered test address, never to prospects.
+          </p>
         </div>
 
         <div className="surface p-4 space-y-3">

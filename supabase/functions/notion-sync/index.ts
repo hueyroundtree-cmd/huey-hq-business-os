@@ -117,7 +117,7 @@ const DEFINITIONS: Record<string, EntityDefinition> = {
   },
   leads: {
     table: "leads",
-    select: "id,crm_id,name,business,phone,email,source,source_record_id,source_url,lead_type,business_unit_id,lead_score,industry,city,address_service_area,priority,verification_source,date_added,service_needed,vehicle,status,estimated_value,deposit,deposit_status,appointment_status,booking_at,last_contact_at,next_follow_up_at,contact_method,contact_date,contacted_by,zoho_email_sent,email_subject,email_body,text_message_template,email_sent_at,text_sent_at,next_action,outreach_status,notes,updated_at",
+    select: "id,crm_id,name,business,phone,email,source,source_record_id,source_url,lead_type,business_unit_id,lead_score,industry,city,address_service_area,priority,verification_source,date_added,service_needed,vehicle,status,estimated_value,deposit,deposit_status,appointment_status,booking_at,last_contact_at,next_follow_up_at,contact_method,contact_date,contacted_by,zoho_email_sent,email_subject,email_body,text_message_template,email_sent_at,zoho_last_sent_at,zoho_last_reply_at,zoho_last_message_id,zoho_last_subject,text_sent_at,next_action,outreach_status,notes,updated_at",
     titleSource: "name",
     title: (row) => row.name,
     fields: [
@@ -155,6 +155,10 @@ const DEFINITIONS: Record<string, EntityDefinition> = {
       { source: "email_body", notion: "Email Body" },
       { source: "text_message_template", notion: "Text Message Template" },
       { source: "email_sent_at", notion: "Email Sent At", kind: "date" },
+      { source: "zoho_last_sent_at", notion: "Zoho Last Sent At", kind: "date" },
+      { source: "zoho_last_reply_at", notion: "Zoho Last Reply At", kind: "date" },
+      { source: "zoho_last_message_id", notion: "Zoho Message ID" },
+      { source: "zoho_last_subject", notion: "Zoho Last Subject" },
       { source: "text_sent_at", notion: "Text Sent At", kind: "date" },
       { source: "next_action", notion: "Next Action" },
       { source: "outreach_status", notion: "Outreach Status", kind: "select" },

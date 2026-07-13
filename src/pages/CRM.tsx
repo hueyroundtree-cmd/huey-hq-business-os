@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { money } from "@/lib/format";
 import { dryRunLeadImport, type ImportDryRunReport } from "@/lib/crmImport";
+import { ZOHO_PRIMARY_SENDER, duplicateSendMessage, saveZohoDraft, sendZohoEmail, syncZohoReplyManually } from "@/lib/zohoMail";
 import {
   BUSINESS_UNITS,
   DEFAULT_BUSINESS_UNIT_ID,
@@ -64,6 +65,10 @@ type Lead = {
   email_body: string | null;
   text_message_template: string | null;
   email_sent_at: string | null;
+  zoho_last_sent_at: string | null;
+  zoho_last_reply_at: string | null;
+  zoho_last_message_id: string | null;
+  zoho_last_subject: string | null;
   text_sent_at: string | null;
   next_action: string | null;
   outreach_status: string | null;
@@ -84,6 +89,30 @@ type Activity = {
   metadata: Record<string, unknown>;
   occurred_at: string;
   created_at: string;
+};
+
+type EmailMessage = {
+  id: string;
+  lead_id: string | null;
+  status: string;
+  direction: string;
+  from_address: string;
+  to_address: string;
+  subject: string;
+  body: string;
+  zoho_message_id: string | null;
+  zoho_draft_id: string | null;
+  sent_at: string | null;
+  replied_at: string | null;
+  follow_up_at: string | null;
+  created_at: string;
+};
+
+type EmailComposer = {
+  toAddress: string;
+  subject: string;
+  body: string;
+  confirmDuplicate: boolean;
 };
 
 type ContactDraft = {
@@ -155,6 +184,9 @@ const smsHref = (lead: Lead) => `sms:${lead.phone ?? ""}${lead.text_message_temp
 export default function CRM() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [emailHistory, setEmailHistory] = useState<EmailMessage[]>([]);
+  const [emailComposer, setEmailComposer] = useState<EmailComposer>(() => buildEmailComposer());
+  const [emailBusy, setEmailBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [stage, setStage] = useState<"all" | LeadStatus | "overdue">("all");
@@ -197,11 +229,31 @@ export default function CRM() {
     setActivities((data as Activity[]) ?? []);
   };
 
+  const loadEmailHistory = async (leadId?: string) => {
+    if (!leadId) {
+      setEmailHistory([]);
+      return;
+    }
+    const { data, error } = await (supabase as any).from("crm_email_messages")
+      .select("*")
+      .eq("lead_id", leadId)
+      .order("created_at", { ascending: false })
+      .limit(20);
+    if (error) {
+      setEmailHistory([]);
+      toast.warning("Email history needs setup", { description: error.message });
+      return;
+    }
+    setEmailHistory((data as EmailMessage[]) ?? []);
+  };
+
   useEffect(() => { load(); }, []);
   useEffect(() => {
     if (params.get("new")) {
       setEditing(emptyLead);
       setActivities([]);
+      setEmailHistory([]);
+      setEmailComposer(buildEmailComposer());
       setEditOpen(true);
       params.delete("new");
       setParams(params, { replace: true });
@@ -319,13 +371,17 @@ export default function CRM() {
     setEditOpen(false);
     setEditing(emptyLead);
     setActivities([]);
+    setEmailHistory([]);
+    setEmailComposer(buildEmailComposer());
     load();
   };
 
   const openLead = (lead: Lead) => {
     setEditing(lead);
+    setEmailComposer(buildEmailComposer(lead));
     setEditOpen(true);
     loadActivities(lead.id);
+    loadEmailHistory(lead.id);
   };
 
   const openContactWorkflow = (lead: Lead) => {
@@ -482,6 +538,69 @@ export default function CRM() {
     }
   };
 
+  const handleSaveZohoDraft = async (lead: Lead, composer: EmailComposer) => {
+    if (!lead.id) return toast.error("Save the lead before saving a Zoho draft.");
+    setEmailBusy(true);
+    try {
+      await saveZohoDraft({
+        leadId: lead.id,
+        toAddress: composer.toAddress,
+        subject: composer.subject,
+        body: composer.body,
+      });
+      toast.success("Zoho draft saved");
+      await loadEmailHistory(lead.id);
+    } catch (error) {
+      toast.error("Zoho draft failed", { description: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
+  const handleSendZohoEmail = async (lead: Lead, composer: EmailComposer) => {
+    if (!lead.id) return toast.error("Save the lead before sending.");
+    setEmailBusy(true);
+    try {
+      const result = await sendZohoEmail({
+        leadId: lead.id,
+        toAddress: composer.toAddress,
+        subject: composer.subject,
+        body: composer.body,
+        confirmDuplicate: composer.confirmDuplicate,
+      });
+      if (result.duplicateWarning) {
+        toast.warning("Duplicate-send warning", { description: duplicateSendMessage(result.lastSent) });
+        setEmailComposer({ ...composer, confirmDuplicate: true });
+        return;
+      }
+      toast.success("Zoho email sent", { description: "Follow-up scheduled three business days out." });
+      await Promise.all([load(), loadActivities(lead.id), loadEmailHistory(lead.id)]);
+    } catch (error) {
+      toast.error("Zoho send failed", { description: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
+  const handleManualReplySync = async (lead: Lead) => {
+    if (!lead.id) return;
+    setEmailBusy(true);
+    try {
+      await syncZohoReplyManually({
+        leadId: lead.id,
+        fromAddress: lead.email,
+        subject: `Reply from ${lead.name}`,
+        body: "Reply manually synced from Zoho Mail.",
+      });
+      toast.success("Reply synced manually");
+      await Promise.all([load(), loadEmailHistory(lead.id)]);
+    } catch (error) {
+      toast.error("Reply sync failed", { description: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
   const syncToNotion = async () => {
     setSyncing(true);
     const { data, error } = await supabase.functions.invoke("notion-sync", {
@@ -534,7 +653,7 @@ export default function CRM() {
           <Button size="sm" variant="outline" onClick={syncToNotion} disabled={syncing}>
             <CloudUpload className="mr-1.5 h-4 w-4" />{syncing ? "Syncing..." : "Sync to Notion"}
           </Button>
-          <Button size="sm" onClick={() => { setEditing(emptyLead); setActivities([]); setEditOpen(true); }}>
+          <Button size="sm" onClick={() => { setEditing(emptyLead); setActivities([]); setEmailHistory([]); setEmailComposer(buildEmailComposer()); setEditOpen(true); }}>
             <Plus className="mr-1.5 h-4 w-4" />Add Lead
           </Button>
         </>}
@@ -625,7 +744,7 @@ export default function CRM() {
             icon={Users}
             title="No matching leads"
             description="Add a lead or change the current pipeline filters."
-            action={<Button size="sm" onClick={() => { setEditing(emptyLead); setActivities([]); setEditOpen(true); }}><Plus className="mr-1.5 h-4 w-4" />Add Lead</Button>}
+            action={<Button size="sm" onClick={() => { setEditing(emptyLead); setActivities([]); setEmailHistory([]); setEmailComposer(buildEmailComposer()); setEditOpen(true); }}><Plus className="mr-1.5 h-4 w-4" />Add Lead</Button>}
           />
         ) : (
           <div className="surface overflow-hidden">
@@ -674,6 +793,13 @@ export default function CRM() {
         onSave={save}
         onMarkContacted={() => editing.id && openContactWorkflow(editing as Lead)}
         onConcordAction={updateConcordAction}
+        emailHistory={emailHistory}
+        emailComposer={emailComposer}
+        setEmailComposer={setEmailComposer}
+        emailBusy={emailBusy}
+        onSaveZohoDraft={handleSaveZohoDraft}
+        onSendZohoEmail={handleSendZohoEmail}
+        onManualReplySync={handleManualReplySync}
       />
       <MarkContactedDialog
         lead={contactLead}
@@ -706,6 +832,28 @@ function buildContactDraft(lead?: Lead): ContactDraft {
     zoho_email_sent: false,
     next_follow_up_at: toLocalInput(follow.toISOString()),
     detail: "",
+  };
+}
+
+function buildEmailComposer(lead?: Partial<Lead>): EmailComposer {
+  return {
+    toAddress: lead?.email ?? "",
+    subject: lead?.email_subject ?? `Quick mobile detailing intro${lead?.business ? ` for ${lead.business}` : ""}`,
+    body: lead?.email_body ?? [
+      `Hi ${lead?.name?.split(" ")[0] ?? "there"},`,
+      "",
+      "This is Huey with Great Freight Mobile Detailing. I wanted to introduce our mobile detailing service for busy professionals and local businesses.",
+      "",
+      "We come directly to your office or home, and services start at $100.",
+      "",
+      "You can learn more at https://gfldetail.com.",
+      "",
+      "Thank you,",
+      "Huey Roundtree III",
+      "Great Freight Mobile Detailing",
+      "(323) 989-4510",
+    ].join("\n"),
+    confirmDuplicate: false,
   };
 }
 
@@ -747,9 +895,26 @@ function StatusPill({ status }: { status: LeadStatus }) {
   return <span className={`inline-flex rounded-sm border px-1.5 py-0.5 text-[10px] font-medium ${styles[status]}`}>{status}</span>;
 }
 
-function LeadDialog({ open, onOpenChange, lead, activities, setLead, onSave, onMarkContacted, onConcordAction }: any) {
+function LeadDialog({
+  open,
+  onOpenChange,
+  lead,
+  activities,
+  setLead,
+  onSave,
+  onMarkContacted,
+  onConcordAction,
+  emailHistory,
+  emailComposer,
+  setEmailComposer,
+  emailBusy,
+  onSaveZohoDraft,
+  onSendZohoEmail,
+  onManualReplySync,
+}: any) {
   const current = lead as Partial<Lead>;
   const set = (key: keyof Lead, value: any) => setLead({ ...current, [key]: value });
+  const setComposer = (key: keyof EmailComposer, value: any) => setEmailComposer({ ...emailComposer, [key]: value });
   const isConcord = isConcordLead(current as Lead);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -830,6 +995,70 @@ function LeadDialog({ open, onOpenChange, lead, activities, setLead, onSave, onM
               {current.id && current.phone && <Button size="sm" variant="outline" onClick={() => onConcordAction(current as Lead, "text_sent")}>Mark text sent</Button>}
               {current.id && <Button size="sm" variant="outline" onClick={() => onConcordAction(current as Lead, "follow_up")}>Follow-up</Button>}
               {current.id && <Button size="sm" onClick={() => onConcordAction(current as Lead, "booked")}>Booked</Button>}
+            </div>
+          </section>
+        )}
+        {current.id && (
+          <section className="rounded-md border border-forest/20 bg-forest/5 p-3">
+            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Zoho Mail composer</div>
+                <p className="text-xs text-muted-foreground">Manual review required. Nothing sends until Huey presses Send Email.</p>
+              </div>
+              <span className="rounded-sm border bg-background px-2 py-1 text-[11px]">From: {ZOHO_PRIMARY_SENDER}</span>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <Field label="Recipient"><Input type="email" value={emailComposer.toAddress} onChange={(event) => setComposer("toAddress", event.target.value)} /></Field>
+              <Field label="Subject"><Input value={emailComposer.subject} onChange={(event) => setComposer("subject", event.target.value)} /></Field>
+              <Field label="Last sent date"><Input value={current.zoho_last_sent_at ? new Date(current.zoho_last_sent_at).toLocaleString() : "Never"} disabled /></Field>
+              <Field label="Last reply date"><Input value={current.zoho_last_reply_at ? new Date(current.zoho_last_reply_at).toLocaleString() : "None"} disabled /></Field>
+              <Field label="Next follow-up"><Input value={current.next_follow_up_at ? new Date(current.next_follow_up_at).toLocaleString() : "Not scheduled"} disabled /></Field>
+              <Field label="Zoho message ID"><Input value={current.zoho_last_message_id ?? ""} disabled /></Field>
+            </div>
+            <Field label="Editable personalized email"><Textarea rows={8} value={emailComposer.body} onChange={(event) => setComposer("body", event.target.value)} /></Field>
+            {emailComposer.confirmDuplicate && (
+              <label className="mt-2 flex items-center gap-2 text-sm text-amber-700">
+                <Checkbox checked={emailComposer.confirmDuplicate} onCheckedChange={(value) => setComposer("confirmDuplicate", Boolean(value))} />
+                Duplicate warning acknowledged. Press Send Email again only if this repeat send is intentional.
+              </label>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => onSaveZohoDraft(current as Lead, emailComposer)} disabled={emailBusy}>
+                Save Draft
+              </Button>
+              <Button size="sm" onClick={() => onSendZohoEmail(current as Lead, emailComposer)} disabled={emailBusy || !emailComposer.toAddress}>
+                <Send className="mr-1.5 h-3.5 w-3.5" />Send Email
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => copyText("Email body", emailComposer.body)}>
+                <Copy className="mr-1.5 h-3.5 w-3.5" />Copy Email
+              </Button>
+              <Button asChild size="sm" variant="outline">
+                <a href="https://mail.zoho.com" target="_blank" rel="noreferrer"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Open in Zoho</a>
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => onManualReplySync(current as Lead)} disabled={emailBusy}>
+                Manual reply sync
+              </Button>
+            </div>
+            <div className="mt-4 rounded-md border bg-background p-3">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Email history</div>
+              {emailHistory.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No Zoho email history logged for this lead yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {emailHistory.map((email: EmailMessage) => (
+                    <div key={email.id} className="rounded border p-2">
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="text-sm font-medium">{email.subject}</div>
+                        <div className="text-[11px] text-muted-foreground">{email.sent_at ? new Date(email.sent_at).toLocaleString() : new Date(email.created_at).toLocaleString()}</div>
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {email.direction} · {email.status} · {email.from_address} → {email.to_address}
+                      </div>
+                      {email.follow_up_at && <div className="mt-1 text-xs">Follow-up: {new Date(email.follow_up_at).toLocaleString()}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </section>
         )}
