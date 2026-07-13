@@ -240,7 +240,7 @@ export default function Outreach() {
                   <div className="flex flex-wrap gap-2">
                     {lead.phone && <Button asChild size="sm" variant="outline"><a href={`tel:${lead.phone}`}><Phone className="mr-1.5 h-3.5 w-3.5" />Call</a></Button>}
                     {lead.phone && <Button asChild size="sm" variant="outline"><a href={`sms:${lead.phone}`}><MessageSquare className="mr-1.5 h-3.5 w-3.5" />Text</a></Button>}
-                    {lead.email && <Button asChild size="sm" variant="outline"><a href={`mailto:${lead.email}`}><Mail className="mr-1.5 h-3.5 w-3.5" />Email</a></Button>}
+                    {lead.email && <Button asChild size="sm" variant="outline"><a href={`mailto:${lead.email}`}><Mail className="mr-1.5 h-3.5 w-3.5" />Open Default Email App</a></Button>}
                     <Button size="sm" variant="outline" onClick={() => logActivity(lead, lead.phone ? "Call" : lead.email ? "Email" : "DM")}>
                       <Send className="mr-1.5 h-3.5 w-3.5" />Log touch
                     </Button>

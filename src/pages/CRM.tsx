@@ -181,6 +181,41 @@ const mailtoHref = (lead: Lead) => {
 
 const smsHref = (lead: Lead) => `sms:${lead.phone ?? ""}${lead.text_message_template ? `?&body=${encodeURIComponent(lead.text_message_template)}` : ""}`;
 
+function EmailButton({
+  lead,
+  onOpenComposer,
+  compact = false,
+}: {
+  lead: Lead;
+  onOpenComposer: (lead: Lead) => void;
+  compact?: boolean;
+}) {
+  if (!lead.email) return null;
+  return (
+    <button
+      type="button"
+      title="Open Zoho composer"
+      aria-label="Open Zoho composer"
+      onClick={() => onOpenComposer(lead)}
+      className={compact ? "rounded border p-2 hover:bg-muted" : "inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm hover:bg-muted"}
+    >
+      <Mail className="h-4 w-4" />
+      {!compact && <span>Email</span>}
+    </button>
+  );
+}
+
+function DefaultEmailAppButton({ lead, variant = "outline" }: { lead: Lead; variant?: "outline" | "ghost" }) {
+  if (!lead.email) return null;
+  return (
+    <Button asChild size="sm" variant={variant}>
+      <a href={mailtoHref(lead)}>
+        <Mail className="mr-1.5 h-3.5 w-3.5" />Open Default Email App
+      </a>
+    </Button>
+  );
+}
+
 const confirmManualEmailSend = (lead: Lead, composer: EmailComposer) =>
   window.confirm([
     `Send this Zoho email from ${ZOHO_PRIMARY_SENDER}?`,
@@ -890,17 +925,7 @@ function ContactActions({
       {lead.source_url && <a title="Website/source" href={lead.source_url} target="_blank" rel="noreferrer" className="rounded border p-2 hover:bg-muted"><ExternalLink className="h-4 w-4" /></a>}
       {lead.phone && <a title="Call lead" href={`tel:${lead.phone}`} className="rounded border p-2 hover:bg-muted"><Phone className="h-4 w-4" /></a>}
       {lead.phone && <a title="Text lead" href={smsHref(lead)} className="rounded border p-2 hover:bg-muted"><MessageSquare className="h-4 w-4" /></a>}
-      {lead.email && (
-        <button
-          type="button"
-          title="Open Zoho composer"
-          aria-label="Open Zoho composer"
-          onClick={() => openEmailComposer(lead)}
-          className="rounded border p-2 hover:bg-muted"
-        >
-          <Mail className="h-4 w-4" />
-        </button>
-      )}
+      <EmailButton lead={lead} onOpenComposer={openEmailComposer} compact />
       {isConcord && lead.email && <Button size="sm" variant="outline" onClick={() => updateConcordAction(lead, "email_sent")}>Email Sent</Button>}
       {isConcord && lead.phone && <Button size="sm" variant="outline" onClick={() => updateConcordAction(lead, "text_sent")}>Text Sent</Button>}
       <Button size="sm" variant="outline" onClick={() => logContact(lead)}>
@@ -1015,7 +1040,7 @@ function LeadDialog({
             <div className="mt-3 flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onClick={() => copyText("Email subject", current.email_subject)}><Copy className="mr-1.5 h-3.5 w-3.5" />Copy subject</Button>
               <Button size="sm" variant="outline" onClick={() => copyText("Email body", current.email_body)}><Copy className="mr-1.5 h-3.5 w-3.5" />Copy email</Button>
-              {current.email && <Button asChild size="sm" variant="outline"><a href={mailtoHref(current as Lead)}><Mail className="mr-1.5 h-3.5 w-3.5" />Open Default Email App</a></Button>}
+              <DefaultEmailAppButton lead={current as Lead} />
               {current.phone && <Button asChild size="sm" variant="outline"><a href={smsHref(current as Lead)}><MessageSquare className="mr-1.5 h-3.5 w-3.5" />Open text</a></Button>}
               {current.phone && <Button asChild size="sm" variant="outline"><a href={`tel:${current.phone}`}><Phone className="mr-1.5 h-3.5 w-3.5" />Call</a></Button>}
               {current.source_url && <Button asChild size="sm" variant="outline"><a href={current.source_url} target="_blank" rel="noreferrer"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Website</a></Button>}
@@ -1063,11 +1088,7 @@ function LeadDialog({
               <Button asChild size="sm" variant="outline">
                 <a href="https://mail.zoho.com" target="_blank" rel="noreferrer"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Open in Zoho</a>
               </Button>
-              {current.email && (
-                <Button asChild size="sm" variant="ghost">
-                  <a href={mailtoHref(current as Lead)}><Mail className="mr-1.5 h-3.5 w-3.5" />Open Default Email App</a>
-                </Button>
-              )}
+              <DefaultEmailAppButton lead={current as Lead} variant="ghost" />
               <Button size="sm" variant="outline" onClick={() => onManualReplySync(current as Lead)} disabled={emailBusy}>
                 Manual reply sync
               </Button>
