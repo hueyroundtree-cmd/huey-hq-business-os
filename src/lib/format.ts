@@ -17,15 +17,35 @@ export const relTime = (iso: string | null | undefined) => {
   return `${days}d ago`;
 };
 
-export const todayISO = () => new Date().toISOString().slice(0, 10);
+const PACIFIC_TIME_ZONE = "America/Los_Angeles";
+const pacificDateParts = new Intl.DateTimeFormat("en-US", {
+  timeZone: PACIFIC_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+export const toPacificDateKey = (value: string | Date = new Date()) => {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const date = value instanceof Date ? value : new Date(value);
+  const parts = Object.fromEntries(pacificDateParts.formatToParts(date).map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+};
+
+export const addDaysISO = (dateKey: string, days: number) => {
+  const d = new Date(`${dateKey}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
+export const todayISO = () => toPacificDateKey(new Date());
 export const startOfWeekISO = () => {
-  const d = new Date();
-  const day = d.getDay(); // 0..6
+  const d = new Date(`${todayISO()}T12:00:00Z`);
+  const day = d.getUTCDay(); // 0..6
   const diff = (day + 6) % 7; // Monday start
-  d.setDate(d.getDate() - diff);
+  d.setUTCDate(d.getUTCDate() - diff);
   return d.toISOString().slice(0, 10);
 };
 export const startOfMonthISO = () => {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+  return `${todayISO().slice(0, 8)}01`;
 };

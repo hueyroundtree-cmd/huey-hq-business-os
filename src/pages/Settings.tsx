@@ -19,6 +19,13 @@ import {
 
 const PRODUCTION_URL = "https://hueyroundtree-cmd.github.io/huey-hq-business-os/";
 const SUPABASE_PROJECT_ID = "mqmskpdduwbiypepzkvc";
+type SettingsDbResult = { data: Record<string, unknown>[] | null; error: { message: string } | null };
+type SettingsDbQuery = PromiseLike<SettingsDbResult> & {
+  select: (columns?: string) => SettingsDbQuery;
+};
+const settingsDb = supabase as unknown as {
+  from: (table: string) => SettingsDbQuery;
+};
 
 export default function Settings() {
   const { user, signOut } = useAuth();
@@ -110,10 +117,10 @@ export default function Settings() {
   };
 
   const exportData = async () => {
-    const tables = ["leads","crm_email_messages","revenue_entries","daily_checkins","tasks","scripts","content_items","business_projects","ai_commands","automations","integrations","sync_mappings","sync_audit","knowledge_docs","bills","jobs","lead_activities","operations_events"];
-    const bundle: Record<string, any> = {};
+    const tables = ["leads","crm_email_messages","revenue_entries","daily_checkins","daily_performance_snapshots","daily_performance_manual_corrections","tasks","scripts","content_items","business_projects","ai_commands","automations","integrations","sync_mappings","sync_audit","knowledge_docs","bills","jobs","lead_activities","operations_events"];
+    const bundle: Record<string, Record<string, unknown>[]> = {};
     for (const t of tables) {
-      const { data } = await supabase.from(t as any).select("*");
+      const { data } = await settingsDb.from(t).select("*");
       bundle[t] = data ?? [];
     }
     const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });

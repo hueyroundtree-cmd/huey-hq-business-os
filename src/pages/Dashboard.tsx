@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { PageHeader } from "@/components/PageHeader";
@@ -14,7 +14,7 @@ import {
   Sunrise, Moon, DollarSign, Users, Bell, FileText, Wrench, AlertTriangle,
   Plug, FolderKanban, BookOpenCheck, ScrollText, Bot, Workflow, CheckCircle2,
   CalendarDays, Video, Target, Sparkles, Plus, Gauge,
-  Dumbbell, GraduationCap, Send, CloudUpload, CalendarPlus, Pencil,
+  Dumbbell, GraduationCap, Send, CloudUpload, CalendarPlus, Pencil, type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useSearchParams, Link } from "react-router-dom";
@@ -27,6 +27,16 @@ import {
   type NotionMappingHealth,
 } from "@/lib/dashboard";
 import { getNextFollowUps, getOpenPipelineValue, type LeadStatus } from "@/lib/crmPipeline";
+import {
+  DEFAULT_SCORE_SETTINGS,
+  aggregateDailyProgress,
+  buildSnapshotUpsertPayload,
+  DEFAULT_BUSINESS_UNIT,
+  getCurrentExecutionStreak,
+  scoreDailyProgress,
+  type DailyProgressInputs,
+  type DailyProgressMetrics,
+} from "@/lib/progress";
 
 type Integration = { provider: string; status: "Connected" | "Not Connected" | "Error"; last_sync_at: string | null };
 
@@ -54,6 +64,62 @@ type DailyPlan = {
   completed: Record<DailyActionKey, boolean>;
 };
 
+type ErrorLike = { message: string };
+type DashboardDbResult<T extends Record<string, unknown> = Record<string, unknown>> = {
+  data: T | T[] | null;
+  error: ErrorLike | null;
+  count?: number | null;
+};
+type DashboardDbQuery<T extends Record<string, unknown> = Record<string, unknown>> = PromiseLike<DashboardDbResult<T>> & {
+  select: (columns?: string, options?: Record<string, unknown>) => DashboardDbQuery<T>;
+  eq: (column: string, value: unknown) => DashboardDbQuery<T>;
+  gte: (column: string, value: string) => DashboardDbQuery<T>;
+  order: (column: string, options?: { ascending?: boolean }) => DashboardDbQuery<T>;
+  limit: (count: number) => DashboardDbQuery<T>;
+  upsert: (payload: unknown, options?: Record<string, unknown>) => Promise<DashboardDbResult<T>>;
+};
+type DailyCheckinRow = {
+  id: string;
+  kind: string;
+  check_date?: string | null;
+  cash_on_hand?: number | null;
+  summary_json?: unknown;
+  notes?: string | null;
+  created_at?: string | null;
+};
+type ProgressSnapshotSummaryRow = Record<string, unknown> & {
+  progress_date: string;
+  business_unit?: string | null;
+  daily_score?: number | string | null;
+  emails_sent?: number | string | null;
+  texts_sent?: number | string | null;
+  calls_made?: number | string | null;
+  followups_completed?: number | string | null;
+  bookings_created?: number | string | null;
+};
+type TopPriorityTask = { id?: string; title: string; done?: boolean; is_top_priority?: boolean };
+type EndDaySnapshot = {
+  metrics: DailyProgressMetrics;
+  revenue: number;
+  outreach: number;
+  bookings: number;
+  completedJobs: number;
+  completedTasks: number;
+  totalTasks: number;
+  incompleteTop: TopPriorityTask[];
+};
+type EndDayDialogProps = {
+  open: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+  dailyDriver: { score?: { percent?: number } } | null;
+};
+
+const dashboardDb = supabase as unknown as {
+  from: <T extends Record<string, unknown> = Record<string, unknown>>(table: string) => DashboardDbQuery<T>;
+};
+const rowsFrom = <T,>(value: unknown): T[] => Array.isArray(value) ? (value as T[]) : [];
+
 const EMPTY_PLAN: DailyPlan = {
   actions: { money: "", content: "", outreach: "", skill: "", health: "" },
   completed: { money: false, content: false, outreach: false, skill: false, health: false },
@@ -74,15 +140,16 @@ export default function Dashboard() {
   const [billsDueTotal, setBillsDueTotal] = useState(0);
   const [contentDue, setContentDue] = useState(0);
   const [cash, setCash] = useState<number | null>(null);
-  const [morning, setMorning] = useState<any | null>(null);
-  const [evening, setEvening] = useState<any | null>(null);
+  const [morning, setMorning] = useState<DailyCheckinRow | null>(null);
+  const [evening, setEvening] = useState<DailyCheckinRow | null>(null);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [notionMappings, setNotionMappings] = useState<NotionMappingHealth[]>([]);
   const [areaSummaries, setAreaSummaries] = useState<AreaSummary[]>([]);
   const [topTasks, setTopTasks] = useState<{ id: string; title: string; done: boolean }[]>([]);
-  const [dailyPlanRecord, setDailyPlanRecord] = useState<any | null>(null);
+  const [dailyPlanRecord, setDailyPlanRecord] = useState<DailyCheckinRow | null>(null);
   const [pipelineLeads, setPipelineLeads] = useState<FollowUpLead[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [progressSummary, setProgressSummary] = useState({ dailyScore: null as number | null, outreachCompleted: 0, followUpsCompleted: 0, jobsBooked: 0, currentStreak: 0 });
 
   const [startOpen, setStartOpen] = useState(false);
   const [endOpen, setEndOpen] = useState(false);
@@ -101,7 +168,7 @@ export default function Dashboard() {
     const [
       rev, leadsRes, followRes, jobsRes, billsRes, contentRes, checkins, integ, tasks,
       mappingsRes, projectsRes, sopsRes, scriptsRes, commandsRes, automationsRes, pipelineRes,
-      contactedTodayRes, appointmentsRes,
+      contactedTodayRes, appointmentsRes, progressRes,
     ] = await Promise.all([
       supabase.from("revenue_entries").select("amount, entry_date").gte("entry_date", month),
       supabase.from("leads").select("id", { count: "exact", head: true }).eq("status", "New Lead"),
@@ -112,21 +179,22 @@ export default function Dashboard() {
       supabase.from("daily_checkins").select("*").eq("check_date", today).order("created_at", { ascending: false }),
       supabase.from("integrations").select("provider, status, last_sync_at"),
       supabase.from("tasks").select("id, title, done").eq("for_date", today).eq("is_top_priority", true).order("created_at"),
-      (supabase.from("sync_mappings") as any).select("entity, status, last_sync_at, last_error, verified_at").eq("provider", "Notion"),
-      (supabase.from("business_projects") as any).select("id, status, due_date"),
+      dashboardDb.from("sync_mappings").select("entity, status, last_sync_at, last_error, verified_at").eq("provider", "Notion"),
+      dashboardDb.from("business_projects").select("id, status, due_date"),
       supabase.from("knowledge_docs").select("id", { count: "exact", head: true }).eq("category", "SOPs"),
       supabase.from("scripts").select("id", { count: "exact", head: true }),
-      (supabase.from("ai_commands") as any).select("id", { count: "exact", head: true }).eq("active", true),
+      dashboardDb.from("ai_commands").select("id", { count: "exact", head: true }).eq("active", true),
       supabase.from("automations").select("id, status"),
       supabase.from("leads").select("id,name,business,status,estimated_value,next_follow_up_at"),
       supabase.from("lead_activities").select("id", { count: "exact", head: true }).gte("created_at", `${today}T00:00:00Z`),
       supabase.from("leads").select("id", { count: "exact", head: true }).eq("status", "Booked"),
+      dashboardDb.from<ProgressSnapshotSummaryRow>("daily_performance_snapshots").select("progress_date,business_unit,daily_score,emails_sent,texts_sent,calls_made,followups_completed,bookings_created").eq("business_unit", DEFAULT_BUSINESS_UNIT).order("progress_date", { ascending: false }).limit(30),
     ]);
 
     const responses = [
       rev, leadsRes, followRes, jobsRes, billsRes, contentRes, checkins, integ, tasks,
       mappingsRes, projectsRes, sopsRes, scriptsRes, commandsRes, automationsRes, pipelineRes,
-      contactedTodayRes, appointmentsRes,
+      contactedTodayRes, appointmentsRes, progressRes,
     ];
     const firstError = responses.find((response) => response.error)?.error;
     if (firstError) setLoadError(firstError.message);
@@ -138,6 +206,15 @@ export default function Dashboard() {
     setNewLeads(leadsRes.count ?? 0);
     setContactedToday(contactedTodayRes.count ?? 0);
     setAppointmentsScheduled(appointmentsRes.count ?? 0);
+    const progressRows = rowsFrom<ProgressSnapshotSummaryRow>(progressRes.data);
+    const todayProgress = progressRows.find((row) => row.progress_date === today);
+    setProgressSummary({
+      dailyScore: todayProgress ? Number(todayProgress.daily_score ?? 0) : null,
+      outreachCompleted: Number(todayProgress?.emails_sent ?? 0) + Number(todayProgress?.texts_sent ?? 0) + Number(todayProgress?.calls_made ?? 0),
+      followUpsCompleted: Number(todayProgress?.followups_completed ?? 0),
+      jobsBooked: Number(todayProgress?.bookings_created ?? 0),
+      currentStreak: getCurrentExecutionStreak(progressRows.map((row) => ({ progress_date: row.progress_date, daily_score: Number(row.daily_score ?? 0) }))),
+    });
     setFollowUpsDue(followRes.count ?? 0);
     setJobsToday(jobsRes.count ?? 0);
     setBillsDueTotal((billsRes.data ?? []).reduce((s, b) => s + Number(b.amount), 0));
@@ -257,8 +334,8 @@ export default function Dashboard() {
     try {
       await savePlan({ ...dailyPlan, completed: { ...dailyPlan.completed, [key]: checked } });
       await load();
-    } catch (error: any) {
-      toast.error(error.message);
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : "Daily action update failed");
     }
   };
 
@@ -280,7 +357,9 @@ export default function Dashboard() {
     });
     if (error || !data?.synced) {
       let detail = data?.record_errors?.[0]?.error ?? data?.error ?? error?.message ?? "No verified sync result returned.";
-      const response = (error as any)?.context;
+      const response = error && typeof error === "object" && "context" in error
+        ? (error as { context?: Response }).context
+        : undefined;
       if (response?.json) {
         try {
           const payload = await response.clone().json();
@@ -375,6 +454,15 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
+        </section>
+
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          <ProgressLinkCard label="Income today" value={money(revToday)} icon={DollarSign} />
+          <ProgressLinkCard label="Daily score" value={`${progressSummary.dailyScore ?? missionControl.score}%`} icon={Gauge} />
+          <ProgressLinkCard label="Outreach completed" value={String(progressSummary.outreachCompleted || contactedToday)} icon={Send} />
+          <ProgressLinkCard label="Follow-ups due/done" value={`${followUpsDue}/${progressSummary.followUpsCompleted}`} icon={Bell} />
+          <ProgressLinkCard label="Jobs booked" value={String(progressSummary.jobsBooked || appointmentsScheduled)} icon={Wrench} />
+          <ProgressLinkCard label="Current streak" value={`${progressSummary.currentStreak}d`} icon={CheckCircle2} />
         </section>
 
         <section className="surface p-4 md:p-5">
@@ -673,7 +761,7 @@ export default function Dashboard() {
 
 const PROVIDERS = ["Notion","Google Drive","Google Calendar","Gmail","Zoho Mail","Shopify","Stan Store","Square"];
 
-function MissionMetric({ label, value, icon: Icon }: any) {
+function MissionMetric({ label, value, icon: Icon }: { label: string; value: ReactNode; icon: LucideIcon }) {
   return (
     <div className="rounded-md border border-background/15 bg-background/5 p-2.5">
       <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wide text-background/50">
@@ -685,7 +773,26 @@ function MissionMetric({ label, value, icon: Icon }: any) {
   );
 }
 
-function DailyAction({ icon: Icon, label, value, checked, onChecked }: any) {
+function ProgressLinkCard({ label, value, icon: Icon }: { label: string; value: ReactNode; icon: LucideIcon }) {
+  return (
+    <Link to="/progress" className="stat-card transition-colors hover:border-gold/50">
+      <div className="flex items-center justify-between">
+        <span className="stat-label">{label}</span>
+        <Icon className="h-4 w-4 text-muted-foreground" />
+      </div>
+      <div className="stat-value">{value}</div>
+      <div className="text-[11px] text-muted-foreground">Open Progress</div>
+    </Link>
+  );
+}
+
+function DailyAction({
+  icon: Icon,
+  label,
+  value,
+  checked,
+  onChecked,
+}: { icon: LucideIcon; label: string; value: string; checked: boolean; onChecked: (checked: boolean) => void }) {
   return (
     <label className="flex min-h-20 cursor-pointer items-start gap-3 rounded-md border bg-background p-3">
       <Checkbox checked={checked} disabled={!value} onCheckedChange={(next) => onChecked(!!next)} />
@@ -803,7 +910,7 @@ function TomorrowPlanDialog({ open, onClose, onSaved }: { open: boolean; onClose
             }));
             const [planResult, taskResult] = await Promise.all([
               supabase.from("daily_checkins").insert({
-                user_id: uid, kind: "plan", check_date: tomorrowISO, summary_json: plan as any,
+                user_id: uid, kind: "plan", check_date: tomorrowISO, summary_json: plan as unknown as Record<string, unknown>,
               }),
               tasks.length ? supabase.from("tasks").insert(tasks) : Promise.resolve({ error: null }),
             ]);
@@ -821,7 +928,14 @@ function TomorrowPlanDialog({ open, onClose, onSaved }: { open: boolean; onClose
   );
 }
 
-function Stat({ label, value, hint, icon: Icon, accent, warn }: any) {
+function Stat({
+  label,
+  value,
+  hint,
+  icon: Icon,
+  accent,
+  warn,
+}: { label: string; value: ReactNode; hint?: ReactNode; icon: LucideIcon; accent?: boolean; warn?: boolean }) {
   return (
     <div className={`stat-card ${accent ? "border-gold/40" : ""} ${warn ? "border-warning/40" : ""}`}>
       <div className="flex items-center justify-between">
@@ -834,7 +948,19 @@ function Stat({ label, value, hint, icon: Icon, accent, warn }: any) {
   );
 }
 
-function StartDayDialog({ open, onClose, onSaved, counts, bankConnected }: any) {
+function StartDayDialog({
+  open,
+  onClose,
+  onSaved,
+  counts,
+  bankConnected,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+  counts: { jobsToday: number; followUpsDue: number; billsDueTotal: number; contentDue: number; newLeads: number };
+  bankConnected: boolean;
+}) {
   const [cash, setCash] = useState<string>("");
   const [t1, setT1] = useState(""); const [t2, setT2] = useState(""); const [t3, setT3] = useState("");
   const [notes, setNotes] = useState("");
@@ -903,79 +1029,152 @@ function StartDayDialog({ open, onClose, onSaved, counts, bankConnected }: any) 
   );
 }
 
-function EndDayDialog({ open, onClose, onSaved, dailyDriver }: any) {
+
+function EndDayDialog({ open, onClose, onSaved, dailyDriver }: EndDayDialogProps) {
   const [wins, setWins] = useState("");
+  const [problems, setProblems] = useState("");
   const [proof, setProof] = useState("");
+  const [tomorrowActions, setTomorrowActions] = useState(["", "", ""]);
   const [carry, setCarry] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [snapshot, setSnapshot] = useState<any>(null);
+  const [snapshot, setSnapshot] = useState<EndDaySnapshot | null>(null);
 
   useEffect(() => {
     if (!open) return;
     (async () => {
       const today = todayISO();
-      const [rev, tasks, leadsContacted] = await Promise.all([
-        supabase.from("revenue_entries").select("amount").eq("entry_date", today),
+      const [rev, tasks, leads, activities, emails, jobs, content, checkins] = await Promise.all([
+        supabase.from("revenue_entries").select("id,entry_date,stream,amount").eq("entry_date", today),
         supabase.from("tasks").select("id, title, done, is_top_priority").eq("for_date", today),
-        supabase.from("lead_activities").select("id", { count: "exact", head: true }).gte("created_at", `${today}T00:00:00Z`),
+        supabase.from("leads").select("id,created_at,updated_at,date_added,status,booking_at,business_unit_id,source,city,contact_method,contact_date,email_sent_at,text_sent_at,last_contact_at,outreach_status,quote_amount,estimated_value,deposit,deposit_status,appointment_status").gte("created_at", `${today}T00:00:00Z`),
+        supabase.from("lead_activities").select("id,lead_id,kind,detail,created_at").gte("created_at", `${today}T00:00:00Z`),
+        dashboardDb.from("crm_email_messages").select("id,lead_id,direction,status,sent_at,replied_at,created_at").gte("created_at", `${today}T00:00:00Z`),
+        supabase.from("jobs").select("id,status,scheduled_at,created_at,updated_at").gte("created_at", `${today}T00:00:00Z`),
+        supabase.from("content_items").select("id,stage,posted_url,created_at,updated_at").gte("created_at", `${today}T00:00:00Z`),
+        supabase.from("daily_checkins").select("kind,check_date,created_at,notes").eq("check_date", today),
       ]);
+      const metrics = aggregateDailyProgress({
+        revenueEntries: rev.data ?? [],
+        leads: leads.data ?? [],
+        activities: activities.data ?? [],
+        emailMessages: rowsFrom<DailyProgressInputs["emailMessages"][number]>(emails.data),
+        jobs: jobs.data ?? [],
+        contentItems: content.data ?? [],
+        dailyCheckins: checkins.data ?? [],
+      }, today, DEFAULT_SCORE_SETTINGS, { businessUnitId: "11111111-1111-4111-8111-111111111111" });
       setSnapshot({
-        revenue: (rev.data ?? []).reduce((s, r) => s + Number(r.amount), 0),
+        metrics,
+        revenue: metrics.revenue_collected,
+        outreach: metrics.emails_sent + metrics.texts_sent + metrics.calls_made,
+        bookings: metrics.bookings_created,
+        completedJobs: metrics.appointments_completed,
         completedTasks: (tasks.data ?? []).filter(t => t.done).length,
         totalTasks: (tasks.data ?? []).length,
-        incompleteTop: (tasks.data ?? []).filter(t => t.is_top_priority && !t.done),
-        leadsContacted: leadsContacted.count ?? 0,
+        incompleteTop: (tasks.data ?? []).filter((task) => task.is_top_priority && !task.done),
       });
     })();
   }, [open]);
 
   const save = async () => {
     setBusy(true);
+    if (!snapshot?.metrics) {
+      toast.error("Progress snapshot is still loading.");
+      setBusy(false);
+      return;
+    }
     const { data: u } = await supabase.auth.getUser();
-    const uid = u.user?.id!;
-    const { error } = await supabase.from("daily_checkins").insert({
-      user_id: uid, kind: "evening", notes: wins,
-      summary_json: { snapshot, proof, carry_forward: carry, daily_driver: dailyDriver },
-    });
-    if (!error && carry && snapshot?.incompleteTop?.length) {
-      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
-      const iso = tomorrow.toISOString().slice(0, 10);
-      await supabase.from("tasks").insert(snapshot.incompleteTop.map((t: any) => ({
-        user_id: uid, title: t.title, is_top_priority: true, for_date: iso,
+    const uid = u.user?.id;
+    if (!uid) {
+      toast.error("Sign in again before closing the day.");
+      setBusy(false);
+      return;
+    }
+    const finalMetrics: DailyProgressMetrics = {
+      ...snapshot?.metrics,
+      end_of_day_review_completed: true,
+      notes: wins,
+      wins,
+      problems,
+      tomorrow_first_actions: tomorrowActions.filter(Boolean),
+    };
+    finalMetrics.daily_score = scoreDailyProgress(finalMetrics, DEFAULT_SCORE_SETTINGS);
+    finalMetrics.goal_completion_percentage = finalMetrics.daily_score;
+    const [checkinResult, snapshotResult] = await Promise.all([
+      supabase.from("daily_checkins").insert({
+        user_id: uid, kind: "evening", notes: wins,
+        summary_json: { snapshot, proof, wins, problems, tomorrow_first_actions: tomorrowActions.filter(Boolean), carry_forward: carry, daily_driver: dailyDriver },
+      }),
+      dashboardDb.from("daily_performance_snapshots").upsert(
+        buildSnapshotUpsertPayload(uid, finalMetrics, {
+          notes: wins,
+          wins,
+          problems,
+          tomorrow_first_actions: tomorrowActions.filter(Boolean),
+          finalized_at: new Date().toISOString(),
+        }),
+        { onConflict: "user_id,business_unit,progress_date" },
+      ),
+    ]);
+    if (!checkinResult.error && !snapshotResult.error && carry && snapshot?.incompleteTop?.length) {
+      const iso = todayISO();
+      const tomorrow = new Date(`${iso}T12:00:00Z`);
+      tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+      const forDate = tomorrow.toISOString().slice(0, 10);
+      await supabase.from("tasks").insert(snapshot.incompleteTop.map((task) => ({
+        user_id: uid, title: task.title, is_top_priority: true, for_date: forDate,
       })));
     }
+    const error = checkinResult.error ?? snapshotResult.error;
     if (error) toast.error(error.message);
-    else { toast.success("Evening review saved"); onClose(); onSaved(); }
+    else {
+      toast.success("Day closed and progress snapshot saved");
+      setWins(""); setProblems(""); setProof(""); setTomorrowActions(["", "", ""]);
+      onClose(); onSaved();
+    }
     setBusy(false);
   };
 
+  const finalScore = snapshot?.metrics
+    ? scoreDailyProgress({ ...snapshot.metrics, end_of_day_review_completed: true }, DEFAULT_SCORE_SETTINGS)
+    : dailyDriver?.score?.percent ?? 0;
+
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>End My Day</DialogTitle>
-          <DialogDescription>Review, log proof, then close the day.</DialogDescription>
+          <DialogTitle>Close Day</DialogTitle>
+          <DialogDescription>Finalize today's snapshot. Finalized historical days stay immutable.</DialogDescription>
         </DialogHeader>
         {snapshot && (
-          <div className="text-sm grid grid-cols-2 gap-2 text-muted-foreground">
-            <div>Revenue logged: <span className="text-foreground font-medium">{money(snapshot.revenue)}</span></div>
+          <div className="grid grid-cols-2 gap-2 text-sm text-muted-foreground">
+            <div>Income total: <span className="text-foreground font-medium">{money(snapshot.revenue)}</span></div>
+            <div>Outreach total: <span className="text-foreground font-medium">{snapshot.outreach}</span></div>
+            <div>Bookings: <span className="text-foreground font-medium">{snapshot.bookings}</span></div>
+            <div>Completed jobs: <span className="text-foreground font-medium">{snapshot.completedJobs}</span></div>
             <div>Tasks: <span className="text-foreground font-medium">{snapshot.completedTasks}/{snapshot.totalTasks}</span></div>
-            <div>Leads contacted: <span className="text-foreground font-medium">{snapshot.leadsContacted}</span></div>
-            <div>Top priorities not done: <span className="text-foreground font-medium">{snapshot.incompleteTop?.length ?? 0}</span></div>
-            <div>Daily Driver score: <span className="text-foreground font-medium">{dailyDriver?.score?.percent ?? 0}%</span></div>
-            <div>Action lanes: <span className="text-foreground font-medium">
-              {Object.values(dailyDriver?.plan?.completed ?? {}).filter(Boolean).length}/5
-            </span></div>
+            <div>Daily score: <span className="text-foreground font-medium">{finalScore}%</span></div>
           </div>
         )}
         <div className="space-y-3">
           <div>
-            <Label>Wins & completed work</Label>
+            <Label>Wins</Label>
             <Textarea value={wins} onChange={(e) => setWins(e.target.value)} rows={3} />
           </div>
           <div>
+            <Label>Problems</Label>
+            <Textarea value={problems} onChange={(e) => setProblems(e.target.value)} rows={2} />
+          </div>
+          <div>
             <Label>Proof (links or notes)</Label>
-            <Textarea value={proof} onChange={(e) => setProof(e.target.value)} rows={2} placeholder="Receipts, message screenshots, posted URLs…" />
+            <Textarea value={proof} onChange={(e) => setProof(e.target.value)} rows={2} placeholder="Receipts, message screenshots, posted URLs..." />
+          </div>
+          <div className="space-y-2">
+            <Label>Tomorrow's first three actions</Label>
+            {tomorrowActions.map((action, index) => (
+              <Input key={index} value={action} onChange={(event) => {
+                const next = [...tomorrowActions]; next[index] = event.target.value; setTomorrowActions(next);
+              }} placeholder={`Action ${index + 1}`} />
+            ))}
           </div>
           {snapshot?.incompleteTop?.length > 0 && (
             <label className="flex items-center gap-2 text-sm">
@@ -986,7 +1185,7 @@ function EndDayDialog({ open, onClose, onSaved, dailyDriver }: any) {
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={save} disabled={busy}>{busy ? "Saving…" : "Close the day"}</Button>
+          <Button onClick={save} disabled={busy}>{busy ? "Saving..." : "Close Day"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

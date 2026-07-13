@@ -28,6 +28,7 @@ import Outreach from "./pages/Outreach";
 import OperationsTimeline from "./pages/OperationsTimeline";
 import SystemHealth from "./pages/SystemHealth";
 import CommandSearch from "./pages/CommandSearch";
+import Progress from "./pages/Progress";
 
 const queryClient = new QueryClient();
 
@@ -47,6 +48,7 @@ const App = () => (
               <Route path="/crm" element={<CRM />} />
               <Route path="/systems" element={<BusinessSystems />} />
               <Route path="/command-center" element={<BusinessSystems />} />
+              <Route path="/progress" element={<Progress />} />
               <Route path="/module-store" element={<ModuleStore />} />
               <Route path="/outreach" element={<Outreach />} />
               <Route path="/timeline" element={<OperationsTimeline />} />
