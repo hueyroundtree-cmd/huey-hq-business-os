@@ -25,6 +25,7 @@ import {
   type LeadStatus,
   type LeadType,
 } from "@/lib/crmPipeline";
+import { CRM_WORKFLOW_STAGES, WAITING_FOLLOW_UP, getCrmWorkflowStage, isToday, type CrmWorkflowStage } from "@/lib/crmWorkflow";
 import { emitOperationEvent } from "@/lib/eventEngine";
 
 type Lead = {
@@ -127,6 +128,7 @@ type ContactDraft = {
 const CONCORD_SOURCE = "Concord Professional Outreach";
 const CONCORD_FILTERS = [
   "Ready to Send",
+  "Waiting Follow-Up",
   "Contact Form",
   "Email Sent",
   "Text Sent",
@@ -229,12 +231,15 @@ const confirmManualEmailSend = (lead: Lead, composer: EmailComposer) =>
 export default function CRM() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [crmActivities, setCrmActivities] = useState<Activity[]>([]);
   const [emailHistory, setEmailHistory] = useState<EmailMessage[]>([]);
   const [emailComposer, setEmailComposer] = useState<EmailComposer>(() => buildEmailComposer());
   const [emailBusy, setEmailBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [stage, setStage] = useState<"all" | LeadStatus | "overdue">("all");
+  const [workflowStage, setWorkflowStage] = useState<"all" | CrmWorkflowStage>("all");
+  const [dailyFilter, setDailyFilter] = useState<"all" | "contacted_today" | "followups_completed_today" | "replies_today" | "bookings_today">("all");
   const [leadType, setLeadType] = useState<"all" | LeadType>("all");
   const [businessUnit, setBusinessUnit] = useState<"all" | string>("all");
   const [concordFilter, setConcordFilter] = useState<"all" | typeof CONCORD_FILTERS[number]>("all");
@@ -274,6 +279,18 @@ export default function CRM() {
     setActivities((data as Activity[]) ?? []);
   };
 
+  const loadCrmActivities = async () => {
+    const { data, error } = await (supabase as any).from("crm_activity")
+      .select("*")
+      .order("occurred_at", { ascending: false })
+      .limit(500);
+    if (error) {
+      setCrmActivities([]);
+      return;
+    }
+    setCrmActivities((data as Activity[]) ?? []);
+  };
+
   const loadEmailHistory = async (leadId?: string) => {
     if (!leadId) {
       setEmailHistory([]);
@@ -292,7 +309,10 @@ export default function CRM() {
     setEmailHistory((data as EmailMessage[]) ?? []);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    loadCrmActivities();
+  }, []);
   useEffect(() => {
     if (params.get("new")) {
       setEditing(emptyLead);
@@ -308,12 +328,37 @@ export default function CRM() {
   const isOverdue = (lead: Lead) =>
     Boolean(lead.next_follow_up_at && lead.next_follow_up_at < new Date().toISOString() && isOpenLead(lead));
 
+  const followUpCompletedLeadIds = useMemo(() => new Set(crmActivities
+    .filter((activity) => isToday(activity.occurred_at) && /follow[- ]?up/i.test(`${activity.title} ${activity.detail ?? ""}`))
+    .map((activity) => activity.lead_id)
+    .filter(Boolean) as string[]), [crmActivities]);
+
+  const matchesDailyFilter = (lead: Lead) => {
+    if (dailyFilter === "all") return true;
+    if (dailyFilter === "contacted_today") return [lead.last_contact_at, lead.contact_date, lead.email_sent_at, lead.text_sent_at, lead.zoho_last_sent_at].some((date) => isToday(date));
+    if (dailyFilter === "followups_completed_today") return followUpCompletedLeadIds.has(lead.id);
+    if (dailyFilter === "replies_today") return isToday(lead.zoho_last_reply_at) || (lead.outreach_status === "Replied" && isToday(lead.updated_at));
+    if (dailyFilter === "bookings_today") return (lead.status === "Booked" || lead.outreach_status === "Booked") && [lead.booking_at, lead.updated_at].some((date) => isToday(date));
+    return true;
+  };
+
   const filtered = useMemo(() => leads.filter((lead) => {
     if (stage === "overdue" && !isOverdue(lead)) return false;
     if (stage !== "all" && stage !== "overdue" && lead.status !== stage) return false;
+    if (workflowStage !== "all" && getCrmWorkflowStage(lead) !== workflowStage) return false;
+    if (!matchesDailyFilter(lead)) return false;
     if (leadType !== "all" && lead.lead_type !== leadType) return false;
     if (businessUnit !== "all" && lead.business_unit_id !== businessUnit) return false;
-    if (concordFilter !== "all" && (!isConcordLead(lead) || lead.outreach_status !== concordFilter)) return false;
+    if (concordFilter !== "all") {
+      if (!isConcordLead(lead)) return false;
+      if (concordFilter === "Waiting Follow-Up" || concordFilter === "Follow-Up Due") {
+        if (getCrmWorkflowStage(lead) !== concordFilter) return false;
+      } else if (concordFilter === "Email Sent") {
+        if (!lead.email_sent_at && !lead.zoho_last_sent_at) return false;
+      } else if (concordFilter === "Text Sent") {
+        if (!lead.text_sent_at) return false;
+      } else if (lead.outreach_status !== concordFilter) return false;
+    }
     if (!query) return true;
     const value = query.toLowerCase();
     return [
@@ -330,7 +375,7 @@ export default function CRM() {
       lead.source,
       lead.source_record_id,
     ].some((item) => item?.toLowerCase().includes(value));
-  }), [leads, query, stage, leadType, businessUnit, concordFilter]);
+  }), [leads, query, stage, workflowStage, dailyFilter, followUpCompletedLeadIds, leadType, businessUnit, concordFilter]);
 
   const save = async () => {
     if (!editing.name?.trim()) return toast.error("Name is required");
@@ -462,6 +507,7 @@ export default function CRM() {
       }),
       supabase.from("leads").update({
         status: nextStatus,
+        outreach_status: WAITING_FOLLOW_UP,
         last_contact_at: contactDate,
         contact_date: contactDate,
         contact_method: contactDraft.contact_method,
@@ -491,6 +537,7 @@ export default function CRM() {
     toast.success(`Marked ${contactLead.name} contacted`);
     setContactLead(null);
     await load();
+    await loadCrmActivities();
     if (editOpen && editing.id === contactLead.id) await loadActivities(contactLead.id);
   };
 
@@ -509,7 +556,7 @@ export default function CRM() {
     if (action === "email_sent") {
       Object.assign(patch, {
         status: "Contacted",
-        outreach_status: "Email Sent",
+        outreach_status: WAITING_FOLLOW_UP,
         zoho_email_sent: true,
         email_sent_at: now.toISOString(),
         last_contact_at: now.toISOString(),
@@ -525,7 +572,7 @@ export default function CRM() {
     if (action === "text_sent") {
       Object.assign(patch, {
         status: lead.status === "New Lead" ? "Contacted" : lead.status,
-        outreach_status: "Text Sent",
+        outreach_status: WAITING_FOLLOW_UP,
         text_sent_at: now.toISOString(),
         last_contact_at: now.toISOString(),
         contact_date: now.toISOString(),
@@ -539,12 +586,12 @@ export default function CRM() {
 
     if (action === "follow_up") {
       Object.assign(patch, {
-        outreach_status: "Follow-Up Due",
+        outreach_status: WAITING_FOLLOW_UP,
         next_follow_up_at: threeBusinessDays,
         next_action: "Follow up on Concord introduction",
       });
-      title = "Follow-up scheduled";
-      detail = "Concord follow-up scheduled three business days out.";
+      title = "Follow-up completed";
+      detail = "Concord follow-up completed and next follow-up scheduled three business days out.";
     }
 
     if (action === "booked") {
@@ -582,6 +629,7 @@ export default function CRM() {
     if (error) return toast.error(error.message);
     toast.success(title);
     await load();
+    await loadCrmActivities();
     if (editOpen && editing.id === lead.id) {
       setEditing({ ...lead, ...patch });
       await loadActivities(lead.id);
@@ -624,8 +672,12 @@ export default function CRM() {
         setEmailComposer({ ...composer, confirmDuplicate: true });
         return;
       }
+      await supabase.from("leads").update({
+        outreach_status: WAITING_FOLLOW_UP,
+        next_action: "Follow up on Zoho email",
+      }).eq("id", lead.id);
       toast.success("Zoho email sent", { description: "Follow-up scheduled three business days out." });
-      await Promise.all([load(), loadActivities(lead.id), loadEmailHistory(lead.id)]);
+      await Promise.all([load(), loadActivities(lead.id), loadEmailHistory(lead.id), loadCrmActivities()]);
     } catch (error) {
       toast.error("Zoho send failed", { description: error instanceof Error ? error.message : String(error) });
     } finally {
@@ -676,6 +728,16 @@ export default function CRM() {
 
   const openPipeline = getOpenPipelineValue(leads);
   const concordLeads = useMemo(() => leads.filter(isConcordLead), [leads]);
+  const workflowSummary = useMemo(() => CRM_WORKFLOW_STAGES.map((workflow) => ({
+    workflow,
+    count: leads.filter((lead) => getCrmWorkflowStage(lead) === workflow).length,
+  })), [leads]);
+  const todaySummary = useMemo(() => ({
+    contacted: leads.filter((lead) => [lead.last_contact_at, lead.contact_date, lead.email_sent_at, lead.text_sent_at, lead.zoho_last_sent_at].some((date) => isToday(date))).length,
+    followupsCompleted: followUpCompletedLeadIds.size,
+    replies: leads.filter((lead) => isToday(lead.zoho_last_reply_at) || (lead.outreach_status === "Replied" && isToday(lead.updated_at))).length,
+    bookings: leads.filter((lead) => (lead.status === "Booked" || lead.outreach_status === "Booked") && [lead.booking_at, lead.updated_at].some((date) => isToday(date))).length,
+  }), [leads, followUpCompletedLeadIds]);
   const concordSummary = useMemo(() => {
     const followDue = concordLeads.filter((lead) =>
       lead.next_follow_up_at && new Date(lead.next_follow_up_at) <= new Date() && !["Booked", "Closed/Lost"].includes(lead.outreach_status ?? ""),
@@ -683,8 +745,9 @@ export default function CRM() {
     return {
       total: concordLeads.length,
       emailsReady: concordLeads.filter((lead) => lead.outreach_status === "Ready to Send" && Boolean(lead.email)).length,
-      emailsSent: concordLeads.filter((lead) => lead.outreach_status === "Email Sent" || lead.email_sent_at).length,
-      textsSent: concordLeads.filter((lead) => lead.outreach_status === "Text Sent" || lead.text_sent_at).length,
+      waitingFollowUp: concordLeads.filter((lead) => getCrmWorkflowStage(lead) === WAITING_FOLLOW_UP).length,
+      emailsSent: concordLeads.filter((lead) => Boolean(lead.email_sent_at || lead.zoho_last_sent_at)).length,
+      textsSent: concordLeads.filter((lead) => Boolean(lead.text_sent_at)).length,
       followUpsDue: followDue.length,
       responses: concordLeads.filter((lead) => lead.outreach_status === "Replied").length,
       bookings: concordLeads.filter((lead) => lead.status === "Booked" || lead.outreach_status === "Booked").length,
@@ -711,13 +774,25 @@ export default function CRM() {
       />
 
       <div className="space-y-4 p-4 md:p-6">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-          <Metric label="Open pipeline" value={money(openPipeline)} />
-          <Metric label="Open leads" value={String(leads.filter(isOpenLead).length)} />
-          <Metric label="New leads" value={String(leads.filter((lead) => lead.status === "New Lead").length)} />
-          <Metric label="Follow-ups due" value={String(leads.filter(isOverdue).length)} />
-          <Metric label="Booked" value={String(leads.filter((lead) => lead.status === "Booked").length)} />
-        </div>
+        <section className="space-y-3">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">All CRM Pipeline Metrics</div>
+            <p className="mt-1 text-sm text-muted-foreground">Whole-CRM view across every lead source and business unit.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+            <Metric label="Open pipeline" value={money(openPipeline)} onClick={() => { setStage("all"); setWorkflowStage("all"); setDailyFilter("all"); setConcordFilter("all"); }} />
+            <Metric label="Open leads" value={String(leads.filter(isOpenLead).length)} onClick={() => { setStage("all"); setWorkflowStage("all"); setDailyFilter("all"); setConcordFilter("all"); }} />
+            <Metric label="New leads" value={String(leads.filter((lead) => lead.status === "New Lead").length)} onClick={() => { setStage("New Lead"); setWorkflowStage("all"); setDailyFilter("all"); setConcordFilter("all"); }} active={stage === "New Lead"} />
+            <Metric label="Follow-ups due" value={String(leads.filter((lead) => getCrmWorkflowStage(lead) === "Follow-Up Due").length)} onClick={() => { setStage("all"); setWorkflowStage("Follow-Up Due"); setDailyFilter("all"); setConcordFilter("all"); }} active={workflowStage === "Follow-Up Due"} />
+            <Metric label="Booked" value={String(leads.filter((lead) => lead.status === "Booked").length)} onClick={() => { setStage("Booked"); setWorkflowStage("all"); setDailyFilter("all"); setConcordFilter("all"); }} active={stage === "Booked"} />
+          </div>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <Metric label="Contacted Today" value={String(todaySummary.contacted)} onClick={() => { setDailyFilter("contacted_today"); setStage("all"); setWorkflowStage("all"); setConcordFilter("all"); }} active={dailyFilter === "contacted_today"} />
+            <Metric label="Follow-Ups Completed Today" value={String(todaySummary.followupsCompleted)} onClick={() => { setDailyFilter("followups_completed_today"); setStage("all"); setWorkflowStage("all"); setConcordFilter("all"); }} active={dailyFilter === "followups_completed_today"} />
+            <Metric label="Replies Today" value={String(todaySummary.replies)} onClick={() => { setDailyFilter("replies_today"); setStage("all"); setWorkflowStage("all"); setConcordFilter("all"); }} active={dailyFilter === "replies_today"} />
+            <Metric label="Bookings Today" value={String(todaySummary.bookings)} onClick={() => { setDailyFilter("bookings_today"); setStage("all"); setWorkflowStage("all"); setConcordFilter("all"); }} active={dailyFilter === "bookings_today"} />
+          </div>
+        </section>
 
         <section className="surface border-l-4 border-l-gold p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -736,36 +811,50 @@ export default function CRM() {
               </SelectContent>
             </Select>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
-            <Metric label="Total Concord" value={String(concordSummary.total)} />
-            <Metric label="Emails ready" value={String(concordSummary.emailsReady)} />
-            <Metric label="Emails sent" value={String(concordSummary.emailsSent)} />
-            <Metric label="Texts sent" value={String(concordSummary.textsSent)} />
-            <Metric label="Follow-ups due" value={String(concordSummary.followUpsDue)} />
-            <Metric label="Responses" value={String(concordSummary.responses)} />
-            <Metric label="Bookings" value={String(concordSummary.bookings)} />
-            <Metric label="Pipeline value" value={money(concordSummary.value)} />
+          <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-9">
+            <Metric label="Total Concord" value={String(concordSummary.total)} onClick={() => { setConcordFilter("all"); setDailyFilter("all"); }} active={concordFilter === "all" && dailyFilter === "all"} />
+            <Metric label="Emails ready" value={String(concordSummary.emailsReady)} onClick={() => { setConcordFilter("Ready to Send"); setDailyFilter("all"); }} active={concordFilter === "Ready to Send"} />
+            <Metric label="Waiting Follow-Up" value={String(concordSummary.waitingFollowUp)} onClick={() => { setConcordFilter("Waiting Follow-Up"); setDailyFilter("all"); }} active={concordFilter === "Waiting Follow-Up"} />
+            <Metric label="Emails sent" value={String(concordSummary.emailsSent)} onClick={() => { setConcordFilter("Email Sent"); setDailyFilter("all"); }} active={concordFilter === "Email Sent"} />
+            <Metric label="Texts sent" value={String(concordSummary.textsSent)} onClick={() => { setConcordFilter("Text Sent"); setDailyFilter("all"); }} active={concordFilter === "Text Sent"} />
+            <Metric label="Follow-ups due" value={String(concordSummary.followUpsDue)} onClick={() => { setConcordFilter("Follow-Up Due"); setDailyFilter("all"); }} active={concordFilter === "Follow-Up Due"} />
+            <Metric label="Responses" value={String(concordSummary.responses)} onClick={() => { setConcordFilter("Replied"); setDailyFilter("all"); }} active={concordFilter === "Replied"} />
+            <Metric label="Bookings" value={String(concordSummary.bookings)} onClick={() => { setConcordFilter("Booked"); setDailyFilter("all"); }} active={concordFilter === "Booked"} />
+            <Metric label="Pipeline value" value={money(concordSummary.value)} onClick={() => { setConcordFilter("all"); setDailyFilter("all"); }} />
           </div>
         </section>
 
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
-          {LEAD_STATUSES.map((status) => (
+        <section className="space-y-3">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Prospect Workflow</div>
+            <p className="mt-1 text-sm text-muted-foreground">Outreach path from new lead to follow-up, booking, completion, review request, or closeout.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-6">
+          {workflowSummary.map(({ workflow, count }) => (
             <button
-              key={status}
-              onClick={() => setStage(status)}
-              className={`surface min-h-20 p-3 text-left transition-colors hover:border-gold/50 ${stage === status ? "border-gold" : ""}`}
+              key={workflow}
+              onClick={() => { setWorkflowStage(workflow); setStage("all"); setDailyFilter("all"); setConcordFilter("all"); }}
+              className={`surface min-h-20 p-3 text-left transition-colors hover:border-gold/50 ${workflowStage === workflow ? "border-gold" : ""}`}
             >
-              <div className="text-xl font-semibold tabular-nums">{leads.filter((lead) => lead.status === status).length}</div>
-              <div className="mt-1 text-xs text-muted-foreground">{status}</div>
+              <div className="text-xl font-semibold tabular-nums">{count}</div>
+              <div className="mt-1 text-xs text-muted-foreground">{workflow}</div>
             </button>
           ))}
-        </div>
+          </div>
+        </section>
 
-        <div className="grid gap-2 lg:grid-cols-[1fr_210px_210px_260px]">
+        <div className="grid gap-2 lg:grid-cols-[1fr_190px_210px_210px_260px]">
           <div className="relative">
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search CRM ID, name, vehicle, phone, email..." className="pl-8" />
           </div>
+          <Select value={workflowStage} onValueChange={(value: any) => { setWorkflowStage(value); setDailyFilter("all"); }}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All workflow stages</SelectItem>
+              {CRM_WORKFLOW_STAGES.map((workflow) => <SelectItem key={workflow} value={workflow}>{workflow}</SelectItem>)}
+            </SelectContent>
+          </Select>
           <Select value={stage} onValueChange={(value: any) => setStage(value)}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -804,6 +893,7 @@ export default function CRM() {
                 <tr>
                   <th className="px-3 py-2 text-left">Lead</th>
                   <th className="px-3 py-2 text-left">Stage</th>
+                  <th className="hidden px-3 py-2 text-left xl:table-cell">Workflow</th>
                   <th className="hidden px-3 py-2 text-left lg:table-cell">Business Unit</th>
                   <th className="hidden px-3 py-2 text-left md:table-cell">Source</th>
                   <th className="hidden px-3 py-2 text-right md:table-cell">Score</th>
@@ -819,6 +909,7 @@ export default function CRM() {
                       <div className="text-xs text-muted-foreground">{[lead.vehicle, lead.business, lead.phone, lead.email].filter(Boolean).join(" · ") || lead.service_needed || ""}</div>
                     </td>
                     <td className="px-3 py-2"><StatusPill status={lead.status} /></td>
+                    <td className="hidden px-3 py-2 xl:table-cell"><WorkflowPill workflow={getCrmWorkflowStage(lead)} /></td>
                     <td className="hidden px-3 py-2 text-xs text-muted-foreground lg:table-cell">{businessUnitName(lead.business_unit_id)}</td>
                     <td className="hidden px-3 py-2 text-xs text-muted-foreground md:table-cell">{lead.source ?? "-"}</td>
                     <td className="hidden px-3 py-2 text-right tabular-nums md:table-cell">{lead.lead_score ?? 0}</td>
@@ -873,9 +964,7 @@ export default function CRM() {
 
 function buildContactDraft(lead?: Lead): ContactDraft {
   const now = new Date();
-  const follow = new Date(now);
-  follow.setDate(follow.getDate() + 2);
-  follow.setHours(9, 0, 0, 0);
+  const follow = addBusinessDays(now, 3);
   return {
     contact_method: lead?.phone ? "Call" : lead?.email ? "Email" : "DM",
     contact_date: toLocalInput(now.toISOString()),
@@ -946,6 +1035,15 @@ function StatusPill({ status }: { status: LeadStatus }) {
     "Closed/Lost": "border-destructive/20 bg-destructive/10 text-destructive",
   };
   return <span className={`inline-flex rounded-sm border px-1.5 py-0.5 text-[10px] font-medium ${styles[status]}`}>{status}</span>;
+}
+
+function WorkflowPill({ workflow }: { workflow: CrmWorkflowStage }) {
+  const urgent = workflow === "Follow-Up Due";
+  return (
+    <span className={`inline-flex rounded-sm border px-1.5 py-0.5 text-[10px] font-medium ${urgent ? "border-destructive/30 bg-destructive/10 text-destructive" : "bg-muted"}`}>
+      {workflow}
+    </span>
+  );
 }
 
 function LeadDialog({
@@ -1168,7 +1266,7 @@ function MarkContactedDialog({ lead, draft, setDraft, onClose, onSave }: {
             <Select value={draft.contact_method} onValueChange={(value) => set("contact_method", value)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                {["Call", "Text", "Email", "Facebook DM", "Craigslist Reply", "Social DM", "In Person"].map((method) => (
+                {["Call", "Text", "Email", "Contact Form", "Facebook DM", "Craigslist Reply", "Social DM", "In Person"].map((method) => (
                   <SelectItem key={method} value={method}>{method}</SelectItem>
                 ))}
               </SelectContent>
@@ -1248,6 +1346,15 @@ function Field({ label, children }: any) {
   return <div className="space-y-1"><Label className="text-xs">{label}</Label>{children}</div>;
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return <div className="stat-card"><div className="stat-label">{label}</div><div className="stat-value">{value}</div></div>;
+function Metric({ label, value, onClick, active = false }: { label: string; value: string; onClick?: () => void; active?: boolean }) {
+  const className = `stat-card text-left ${onClick ? "transition-colors hover:border-gold/50" : ""} ${active ? "border-gold" : ""}`;
+  if (onClick) {
+    return (
+      <button type="button" className={className} onClick={onClick}>
+        <div className="stat-label">{label}</div>
+        <div className="stat-value">{value}</div>
+      </button>
+    );
+  }
+  return <div className={className}><div className="stat-label">{label}</div><div className="stat-value">{value}</div></div>;
 }
