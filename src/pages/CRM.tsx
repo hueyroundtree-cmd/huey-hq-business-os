@@ -25,7 +25,15 @@ import {
   type LeadStatus,
   type LeadType,
 } from "@/lib/crmPipeline";
-import { CRM_WORKFLOW_STAGES, WAITING_FOLLOW_UP, getCrmWorkflowStage, isToday, type CrmWorkflowStage } from "@/lib/crmWorkflow";
+import {
+  CRM_WORKFLOW_STAGES,
+  WAITING_FOLLOW_UP,
+  getCrmDailySummary,
+  getCrmWorkflowStage,
+  matchesCrmDailyKpi,
+  type CrmDailyKpi,
+  type CrmWorkflowStage,
+} from "@/lib/crmWorkflow";
 import { emitOperationEvent } from "@/lib/eventEngine";
 
 type Lead = {
@@ -239,7 +247,7 @@ export default function CRM() {
   const [query, setQuery] = useState("");
   const [stage, setStage] = useState<"all" | LeadStatus | "overdue">("all");
   const [workflowStage, setWorkflowStage] = useState<"all" | CrmWorkflowStage>("all");
-  const [dailyFilter, setDailyFilter] = useState<"all" | "contacted_today" | "followups_completed_today" | "replies_today" | "bookings_today">("all");
+  const [dailyFilter, setDailyFilter] = useState<"all" | CrmDailyKpi>("all");
   const [leadType, setLeadType] = useState<"all" | LeadType>("all");
   const [businessUnit, setBusinessUnit] = useState<"all" | string>("all");
   const [concordFilter, setConcordFilter] = useState<"all" | typeof CONCORD_FILTERS[number]>("all");
@@ -328,25 +336,11 @@ export default function CRM() {
   const isOverdue = (lead: Lead) =>
     Boolean(lead.next_follow_up_at && lead.next_follow_up_at < new Date().toISOString() && isOpenLead(lead));
 
-  const followUpCompletedLeadIds = useMemo(() => new Set(crmActivities
-    .filter((activity) => isToday(activity.occurred_at) && /follow[- ]?up/i.test(`${activity.title} ${activity.detail ?? ""}`))
-    .map((activity) => activity.lead_id)
-    .filter(Boolean) as string[]), [crmActivities]);
-
-  const matchesDailyFilter = (lead: Lead) => {
-    if (dailyFilter === "all") return true;
-    if (dailyFilter === "contacted_today") return [lead.last_contact_at, lead.contact_date, lead.email_sent_at, lead.text_sent_at, lead.zoho_last_sent_at].some((date) => isToday(date));
-    if (dailyFilter === "followups_completed_today") return followUpCompletedLeadIds.has(lead.id);
-    if (dailyFilter === "replies_today") return isToday(lead.zoho_last_reply_at) || (lead.outreach_status === "Replied" && isToday(lead.updated_at));
-    if (dailyFilter === "bookings_today") return (lead.status === "Booked" || lead.outreach_status === "Booked") && [lead.booking_at, lead.updated_at].some((date) => isToday(date));
-    return true;
-  };
-
   const filtered = useMemo(() => leads.filter((lead) => {
     if (stage === "overdue" && !isOverdue(lead)) return false;
     if (stage !== "all" && stage !== "overdue" && lead.status !== stage) return false;
     if (workflowStage !== "all" && getCrmWorkflowStage(lead) !== workflowStage) return false;
-    if (!matchesDailyFilter(lead)) return false;
+    if (!matchesCrmDailyKpi(lead, dailyFilter, crmActivities)) return false;
     if (leadType !== "all" && lead.lead_type !== leadType) return false;
     if (businessUnit !== "all" && lead.business_unit_id !== businessUnit) return false;
     if (concordFilter !== "all") {
@@ -375,7 +369,7 @@ export default function CRM() {
       lead.source,
       lead.source_record_id,
     ].some((item) => item?.toLowerCase().includes(value));
-  }), [leads, query, stage, workflowStage, dailyFilter, followUpCompletedLeadIds, leadType, businessUnit, concordFilter]);
+  }), [leads, query, stage, workflowStage, dailyFilter, crmActivities, leadType, businessUnit, concordFilter]);
 
   const save = async () => {
     if (!editing.name?.trim()) return toast.error("Name is required");
@@ -400,6 +394,31 @@ export default function CRM() {
       payload.next_follow_up_at = followUp.toISOString();
     }
     const previous = editing.id ? leads.find((lead) => lead.id === editing.id) : null;
+    const nowIso = new Date().toISOString();
+    const movedToContacted = payload.status === "Contacted" && previous?.status !== "Contacted";
+    const movedToBooked = payload.status === "Booked" && previous?.status !== "Booked";
+    const movedToReplied = payload.outreach_status === "Replied" && previous?.outreach_status !== "Replied";
+
+    if (movedToContacted) {
+      payload.last_contact_at = payload.last_contact_at || nowIso;
+      payload.contact_date = payload.contact_date || nowIso;
+      payload.contact_method = payload.contact_method || "Manual Update";
+      payload.contacted_by = payload.contacted_by || "Huey";
+      payload.outreach_status = payload.outreach_status || WAITING_FOLLOW_UP;
+      payload.next_follow_up_at = payload.next_follow_up_at || addBusinessDays(new Date(nowIso), 3).toISOString();
+    }
+
+    if (movedToBooked) {
+      payload.booking_at = payload.booking_at || nowIso;
+      payload.outreach_status = payload.outreach_status || "Booked";
+      payload.appointment_status = payload.appointment_status || "Booked";
+    }
+
+    if (movedToReplied) {
+      payload.zoho_last_reply_at = payload.zoho_last_reply_at || nowIso;
+      payload.next_action = payload.next_action || "Review reply and book appointment";
+    }
+
     const result = editing.id
       ? await supabase.from("leads").update(payload).eq("id", editing.id).select("*").single()
       : await supabase.from("leads").insert(payload).select("*").single();
@@ -437,21 +456,49 @@ export default function CRM() {
       else toast.success("Lead saved and follow-up workflow created");
     } else {
       if (previous?.status !== saved.status) {
+        const statusTitle = saved.status === "Contacted" ? "Lead contacted" : saved.status === "Booked" ? "Lead booked" : saved.status;
+        const statusDetail = saved.status === "Contacted"
+          ? `${saved.contact_method ?? "Manual update"} completed by ${saved.contacted_by ?? "Huey"}.`
+          : `Status changed from ${previous?.status ?? "Unknown"} to ${saved.status}`;
         await Promise.all([
           supabase.from("lead_activities").insert({
             user_id: auth.user.id,
             lead_id: saved.id,
-            kind: saved.status,
-            detail: `Status changed from ${previous?.status ?? "Unknown"} to ${saved.status}`,
+            kind: statusTitle,
+            detail: statusDetail,
+            created_at: saved.status === "Contacted" ? (saved.contact_date ?? saved.last_contact_at ?? nowIso) : nowIso,
           }),
           emitOperationEvent({
             userId: auth.user.id,
-            eventType: saved.status.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+            eventType: saved.status === "Contacted" ? "lead_contacted" : saved.status.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
             entityType: "lead",
             entityId: saved.id,
-            title: saved.status,
-            detail: `${saved.name} moved from ${previous?.status ?? "Unknown"} to ${saved.status}.`,
+            title: statusTitle,
+            detail: statusDetail,
             source: "CRM",
+            occurredAt: saved.status === "Contacted" ? (saved.contact_date ?? saved.last_contact_at ?? nowIso) : nowIso,
+            metadata: { crm_id: saved.crm_id, contact_method: saved.contact_method, outreach_status: saved.outreach_status },
+          }),
+        ]);
+      }
+      if (previous?.outreach_status !== "Replied" && saved.outreach_status === "Replied") {
+        await Promise.all([
+          supabase.from("lead_activities").insert({
+            user_id: auth.user.id,
+            lead_id: saved.id,
+            kind: "Reply received",
+            detail: "Lead manually marked replied in CRM.",
+            created_at: saved.zoho_last_reply_at ?? nowIso,
+          }),
+          emitOperationEvent({
+            userId: auth.user.id,
+            eventType: "lead_replied",
+            entityType: "lead",
+            entityId: saved.id,
+            title: "Reply received",
+            detail: `${saved.name} manually marked replied in CRM.`,
+            source: "CRM",
+            occurredAt: saved.zoho_last_reply_at ?? nowIso,
             metadata: { crm_id: saved.crm_id },
           }),
         ]);
@@ -463,7 +510,7 @@ export default function CRM() {
     setActivities([]);
     setEmailHistory([]);
     setEmailComposer(buildEmailComposer());
-    load();
+    await Promise.all([load(), loadCrmActivities()]);
   };
 
   const openLead = (lead: Lead) => {
@@ -732,12 +779,7 @@ export default function CRM() {
     workflow,
     count: leads.filter((lead) => getCrmWorkflowStage(lead) === workflow).length,
   })), [leads]);
-  const todaySummary = useMemo(() => ({
-    contacted: leads.filter((lead) => [lead.last_contact_at, lead.contact_date, lead.email_sent_at, lead.text_sent_at, lead.zoho_last_sent_at].some((date) => isToday(date))).length,
-    followupsCompleted: followUpCompletedLeadIds.size,
-    replies: leads.filter((lead) => isToday(lead.zoho_last_reply_at) || (lead.outreach_status === "Replied" && isToday(lead.updated_at))).length,
-    bookings: leads.filter((lead) => (lead.status === "Booked" || lead.outreach_status === "Booked") && [lead.booking_at, lead.updated_at].some((date) => isToday(date))).length,
-  }), [leads, followUpCompletedLeadIds]);
+  const todaySummary = useMemo(() => getCrmDailySummary(leads, crmActivities), [leads, crmActivities]);
   const concordSummary = useMemo(() => {
     const followDue = concordLeads.filter((lead) =>
       lead.next_follow_up_at && new Date(lead.next_follow_up_at) <= new Date() && !["Booked", "Closed/Lost"].includes(lead.outreach_status ?? ""),
