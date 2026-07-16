@@ -39,3 +39,13 @@ Merges to `main` run `.github/workflows/deploy-pages.yml`. Production credential
 - `VITE_SUPABASE_PUBLISHABLE_KEY`
 
 The deployment is valid only when the production bundle references `mqmskpdduwbiypepzkvc`.
+
+## Stabilization Rules
+
+- **Daily Driver Notion page:** `37f0c11a-8316-810c-bc3d-c6b7679c1244`.
+- **CRM canonical source:** Supabase `leads`; Notion receives verified CRM snapshots/syncs from that source.
+- **Finance canonical source:** Supabase `revenue_entries`; the Revenue Center reads and writes this same table.
+- **Finance required fields:** Source, Date, Gross amount, Available amount, Income lane, Week, Month, Notes/proof.
+- **Truthful connection statuses only:** `Verified Live`, `Needs Setup`, `Error`, `Manual Only`, `Not Implemented`.
+- **CEO DAILY code rule:** CEO DAILY may identify software problems, but all code, GitHub, Supabase, API, deployment, and frontend changes must be routed to the COMMAND CENTER Codex thread.
+- **Production source of truth:** repository `huey-hq-business-os`, GitHub Pages hosting, owned Supabase backend. Lovable is mockups/prototyping only.

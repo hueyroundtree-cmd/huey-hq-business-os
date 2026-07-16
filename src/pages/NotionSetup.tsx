@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
 import { EmptyState } from "@/components/EmptyState";
-import { NOTION_ENTITIES, notionEntity, type NotionEntityKey } from "@/lib/notionEntities";
+import { DAILY_DRIVER_NOTION_PAGE_ID, NOTION_ENTITIES, notionEntity, type NotionEntityKey } from "@/lib/notionEntities";
+import type { ConnectionState } from "@/lib/connectionHealth";
 import { toast } from "sonner";
 import { relTime } from "@/lib/format";
 import { ArrowLeft, Database, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
@@ -16,7 +17,7 @@ type Mapping = {
   entity: NotionEntityKey;
   target_ref: string;
   field_map: Record<string, string>;
-  status: "Connected" | "Not Connected" | "Error";
+  status: ConnectionState;
   last_sync_at: string | null;
   last_error: string | null;
   verified_at: string | null;
@@ -57,7 +58,7 @@ export default function NotionSetup() {
     setAudits((a.data as Audit[]) ?? []);
     if (selected) {
       const current = (m.data as unknown as Mapping[] | null)?.find((item) => item.entity === selected.key);
-      setTargetRef(current?.target_ref ?? "");
+      setTargetRef(current?.target_ref ?? (selected.key === "daily_checkins" ? DAILY_DRIVER_NOTION_PAGE_ID : ""));
     }
   };
 
@@ -69,11 +70,12 @@ export default function NotionSetup() {
     () => mappings.find((mapping) => mapping.entity === selected?.key),
     [mappings, selected],
   );
-  const globalStatus = (integration?.status ?? "Not Connected") as "Connected" | "Not Connected" | "Error";
-  const pageStatus = current?.status ?? "Not Connected";
+  const globalStatus = (integration?.status ?? "Needs Setup") as ConnectionState;
+  const pageStatus = current?.status ?? "Needs Setup";
 
   const saveMapping = async () => {
-    if (!selected || !targetRef.trim()) return toast.error("Notion data source ID required");
+    const canonicalTargetRef = selected?.key === "daily_checkins" ? DAILY_DRIVER_NOTION_PAGE_ID : targetRef.trim();
+    if (!selected || !canonicalTargetRef) return toast.error("Notion data source ID required");
     const { data } = await supabase.auth.getUser();
     if (!data.user) return toast.error("Sign in again before saving.");
     const { error } = await supabase.from("sync_mappings").upsert(
@@ -81,9 +83,9 @@ export default function NotionSetup() {
         user_id: data.user.id,
         provider: "Notion",
         entity: selected.key,
-        target_ref: targetRef.trim(),
+        target_ref: canonicalTargetRef,
         field_map: current?.field_map ?? {},
-        status: "Not Connected",
+        status: "Needs Setup",
         last_error: null,
       } as any,
       { onConflict: "user_id,provider,entity" },
@@ -126,7 +128,7 @@ export default function NotionSetup() {
       <div>
         <PageHeader
           title="Notion Connections"
-          description="Each data area verifies and syncs independently. Connected means Notion returned a real response."
+          description="Each data area verifies and syncs independently. Verified Live means Notion returned a real response."
           actions={<ConnectionBadge status={globalStatus} lastSync={integration?.last_sync_at} />}
         />
         <div className="p-4 md:p-6 space-y-4">
@@ -137,7 +139,7 @@ export default function NotionSetup() {
           <div className="grid gap-3 md:grid-cols-2">
             {NOTION_ENTITIES.map((entity) => {
               const mapping = mappings.find((item) => item.entity === entity.key);
-              const status = mapping?.status ?? "Not Connected";
+              const status = mapping?.status ?? "Needs Setup";
               return (
                 <Link
                   key={entity.key}
@@ -185,7 +187,8 @@ export default function NotionSetup() {
             <Input
               value={targetRef}
               onChange={(event) => setTargetRef(event.target.value)}
-              placeholder="Notion data source ID"
+              placeholder={selected.key === "daily_checkins" ? DAILY_DRIVER_NOTION_PAGE_ID : "Notion data source ID"}
+              readOnly={selected.key === "daily_checkins"}
               className="flex-1"
             />
             <Button onClick={saveMapping}>Save mapping</Button>

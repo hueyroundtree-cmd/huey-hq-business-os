@@ -74,7 +74,7 @@ export default function SystemHealth() {
     const notionError = integrationResult.error?.message ?? mappingResult.error?.message ?? notion?.last_error ?? null;
     const notionVerifiedAt = latestTimestamp([
       notion?.last_sync_at,
-      ...mappings.filter((item) => item.status === "Connected").map((item) => item.verified_at),
+      ...mappings.filter((item) => item.status === "Verified Live").map((item) => item.verified_at),
     ]);
     const mappingHealth = (entity: "leads" | "daily_checkins", name: string): HealthItem => {
       const mapping = mappings.find((item) => item.entity === entity);
@@ -82,7 +82,7 @@ export default function SystemHealth() {
       return {
         name,
         status: stateFromEvidence({
-          succeeded: mapping?.status === "Connected",
+          succeeded: mapping?.status === "Verified Live",
           verifiedAt: mapping?.verified_at ?? mapping?.last_sync_at,
           error,
         }),

@@ -641,39 +641,57 @@ export type Database = {
       revenue_entries: {
         Row: {
           amount: number
+          available_amount: number | null
           created_at: string
           entry_date: string
+          gross_amount: number | null
           id: string
+          income_lane: Database["public"]["Enums"]["income_stream"] | null
+          month_start: string | null
           notes: string | null
           payment_method: string | null
           proof_url: string | null
+          source: string | null
           stream: Database["public"]["Enums"]["income_stream"]
           updated_at: string
           user_id: string
+          week_start: string | null
         }
         Insert: {
           amount: number
+          available_amount?: number | null
           created_at?: string
           entry_date?: string
+          gross_amount?: number | null
           id?: string
+          income_lane?: Database["public"]["Enums"]["income_stream"] | null
+          month_start?: string | null
           notes?: string | null
           payment_method?: string | null
           proof_url?: string | null
+          source?: string | null
           stream: Database["public"]["Enums"]["income_stream"]
           updated_at?: string
           user_id: string
+          week_start?: string | null
         }
         Update: {
           amount?: number
+          available_amount?: number | null
           created_at?: string
           entry_date?: string
+          gross_amount?: number | null
           id?: string
+          income_lane?: Database["public"]["Enums"]["income_stream"] | null
+          month_start?: string | null
           notes?: string | null
           payment_method?: string | null
           proof_url?: string | null
+          source?: string | null
           stream?: Database["public"]["Enums"]["income_stream"]
           updated_at?: string
           user_id?: string
+          week_start?: string | null
         }
         Relationships: []
       }
@@ -868,7 +886,7 @@ export type Database = {
         | "Content"
         | "Investing"
         | "Other"
-      integration_status: "Not Connected" | "Connected" | "Error"
+      integration_status: "Needs Setup" | "Verified Live" | "Error" | "Manual Only" | "Not Implemented"
       lead_status:
         | "New Lead"
         | "Contacted"
@@ -1028,7 +1046,7 @@ export const Constants = {
         "Investing",
         "Other",
       ],
-      integration_status: ["Not Connected", "Connected", "Error"],
+      integration_status: ["Needs Setup", "Verified Live", "Error", "Manual Only", "Not Implemented"],
       lead_status: [
         "New Lead",
         "Contacted",

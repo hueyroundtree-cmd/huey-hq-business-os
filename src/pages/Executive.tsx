@@ -9,7 +9,7 @@ const DEPTS = [
   { key: "Operations", brief: "Jobs, scheduling, checklists." },
   { key: "Sales", brief: "Lead flow, follow-ups, conversion." },
   { key: "Marketing", brief: "Positioning, offers, channels." },
-  { key: "Content", brief: "Ideas → posted. Repurposing." },
+  { key: "Content", brief: "Ideas â†’ posted. Repurposing." },
   { key: "Customer Success", brief: "Bookings, delivery, reviews." },
   { key: "Automation", brief: "Registered automations & health." },
 ];
@@ -52,7 +52,7 @@ export default function Executive() {
         stats.overdueFollowups > 0 ? `${stats.overdueFollowups} overdue follow-ups to work.` : "No overdue follow-ups. Prospect.",
       ];
       case "Content": return [
-        stats.contentInFlight > 0 ? `${stats.contentInFlight} items in flight — move one to Posted today.` : "Pipeline empty. Capture 3 ideas.",
+        stats.contentInFlight > 0 ? `${stats.contentInFlight} items in flight â€” move one to Posted today.` : "Pipeline empty. Capture 3 ideas.",
       ];
       case "Automation": return [
         stats.autoTotal === 0 ? "No automations registered yet." : `${stats.activeAutos}/${stats.autoTotal} automations Active.`,
@@ -63,7 +63,7 @@ export default function Executive() {
 
   return (
     <div>
-      <PageHeader title="AI Executive Team" description="Deterministic recommendations from your own data. AI provider Not Connected — proposed actions require your review." />
+      <PageHeader title="AI Executive Team" description="Deterministic recommendations from your own data. AI provider Not Implemented â€” proposed actions require your review." />
       <div className="p-4 md:p-6 grid md:grid-cols-2 lg:grid-cols-4 gap-3">
         {DEPTS.map(d => (
           <div key={d.key} className="surface p-4 flex flex-col gap-2">
@@ -77,7 +77,7 @@ export default function Executive() {
               {recFor(d.key).map((r, i) => <li key={i}>{r}</li>)}
             </ul>
             <div className="text-[10px] text-muted-foreground/80 mt-auto pt-2 border-t">
-              Updated {relTime(lastSync)} · <span className="uppercase tracking-wide">AI: Not Connected</span>
+              Updated {relTime(lastSync)} Â· <span className="uppercase tracking-wide">AI: Not Implemented</span>
             </div>
           </div>
         ))}

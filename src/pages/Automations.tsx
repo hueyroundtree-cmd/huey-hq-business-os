@@ -58,7 +58,7 @@ export default function Automations() {
                       <td className="px-3 py-2 text-muted-foreground">{r.platform ?? "—"}</td>
                       <td className="px-3 py-2 text-muted-foreground">{r.trigger ?? "—"}</td>
                       <td className="px-3 py-2 text-muted-foreground">{r.last_run_at ? relTime(r.last_run_at) : "never"}</td>
-                      <td className="px-3 py-2"><ConnectionBadge status={r.status === "Active" ? "Connected" : r.status === "Error" ? "Error" : "Not Connected"} /></td>
+                      <td className="px-3 py-2"><ConnectionBadge status={r.status === "Active" ? "Verified Live" : r.status === "Error" ? "Error" : "Needs Setup"} /></td>
                     </tr>
                   ))}
                 </tbody>

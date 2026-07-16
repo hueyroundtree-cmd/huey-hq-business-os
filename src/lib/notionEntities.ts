@@ -1,3 +1,8 @@
+// Canonical Daily Driver / CEO Dashboard Notion page.
+// Update this constant and the matching Supabase sync_mappings row if Huey moves
+// the Daily Driver page; do not hardcode alternate Daily Driver page IDs.
+export const DAILY_DRIVER_NOTION_PAGE_ID = "37f0c11a-8316-810c-bc3d-c6b7679c1244";
+
 export const NOTION_ENTITIES = [
   {
     key: "tasks",

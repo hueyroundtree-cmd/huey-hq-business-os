@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button";
 type Module = {
   label: string;
   to?: string;
-  status: "Active" | "Connected" | "Planned";
+  status: "Active" | "Needs Setup" | "Planned";
 };
 
 type Division = {
@@ -87,9 +87,9 @@ const divisions: Division[] = [
     accent: "border-sky-500/40",
     manager: "AI Store Manager",
     modules: [
-      { label: "Products", to: "/integrations", status: "Connected" },
-      { label: "Orders", to: "/integrations", status: "Connected" },
-      { label: "Inventory", to: "/integrations", status: "Connected" },
+      { label: "Products", to: "/integrations", status: "Needs Setup" },
+      { label: "Orders", to: "/integrations", status: "Needs Setup" },
+      { label: "Inventory", to: "/integrations", status: "Needs Setup" },
       { label: "Marketing", to: "/content", status: "Active" },
     ],
   },
@@ -147,7 +147,7 @@ const commandServices = [
 ];
 
 function Status({ value }: { value: Module["status"] }) {
-  const active = value !== "Planned";
+  const active = value === "Active";
   return (
     <span className={`inline-flex items-center gap-1 text-[10px] ${active ? "text-forest" : "text-muted-foreground"}`}>
       {active ? <CheckCircle2 className="h-3 w-3" /> : <CircleDashed className="h-3 w-3" />}

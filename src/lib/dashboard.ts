@@ -1,8 +1,9 @@
 import { NOTION_ENTITIES, type NotionEntityKey } from "@/lib/notionEntities";
+import type { ConnectionState } from "@/lib/connectionHealth";
 
 export type NotionMappingHealth = {
   entity: NotionEntityKey;
-  status: "Connected" | "Not Connected" | "Error";
+  status: ConnectionState;
   last_sync_at: string | null;
   last_error: string | null;
   verified_at: string | null;
@@ -10,15 +11,15 @@ export type NotionMappingHealth = {
 
 export function getNotionHealth(mappings: NotionMappingHealth[]) {
   const connected = mappings.filter(
-    (mapping) => mapping.status === "Connected" && Boolean(mapping.verified_at),
+    (mapping) => mapping.status === "Verified Live" && Boolean(mapping.verified_at),
   );
-  const status: "Connected" | "Not Connected" | "Error" =
+  const status: ConnectionState =
     mappings.some((mapping) => mapping.status === "Error")
       ? "Error"
       : mappings.length === NOTION_ENTITIES.length &&
           connected.length === NOTION_ENTITIES.length
-        ? "Connected"
-        : "Not Connected";
+        ? "Verified Live"
+        : "Needs Setup";
   const lastSync =
     mappings
       .map((mapping) => mapping.last_sync_at)
