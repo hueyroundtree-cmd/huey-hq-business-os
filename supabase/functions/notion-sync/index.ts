@@ -11,6 +11,13 @@ const json = (body: unknown, status = 200) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
+type ConnectionStatus = "Verified Live" | "Needs Setup" | "Error" | "Manual Only" | "Not Implemented";
+
+// Canonical Notion destination for the Daily Driver / CEO Dashboard page.
+// If Huey moves Daily Driver in Notion, update this one value and the matching
+// sync_mappings row; do not hardcode another Daily Driver page anywhere else.
+const DAILY_DRIVER_PAGE_ID = "37f0c11a-8316-810c-bc3d-c6b7679c1244";
+
 const notionRequest = async (token: string, path: string, init: RequestInit = {}) => {
   const response = await fetch(`https://api.notion.com/v1${path}`, {
     ...init,
@@ -48,13 +55,13 @@ const dailyPlanBlocks = (row: Record<string, any>) => {
     : {};
   const actionLines = actions
     .filter(([, value]) => typeof value === "string" && value.trim())
-    .map(([key, value]) => `${completed[key] ? "Done" : "Open"} — ${value}`);
+    .map(([key, value]) => `${completed[key] ? "Done" : "Open"} â€” ${value}`);
 
   return [
     {
       object: "block",
       type: "heading_2",
-      heading_2: { rich_text: richText(`Huey HQ Daily Plan — ${row.check_date}`) },
+      heading_2: { rich_text: richText(`Huey HQ Daily Plan â€” ${row.check_date}`) },
     },
     ...actionLines.map(paragraphBlock),
     ...(row.notes ? [paragraphBlock(`Notes: ${row.notes}`)] : []),
@@ -209,13 +216,17 @@ const DEFINITIONS: Record<string, EntityDefinition> = {
   },
   revenue_entries: {
     table: "revenue_entries",
-    select: "id,entry_date,stream,amount,payment_method,proof_url,notes,updated_at",
+    select: "id,entry_date,source,stream,income_lane,amount,gross_amount,available_amount,payment_method,proof_url,notes,week_start,month_start,updated_at",
     titleSource: "entry",
-    title: (row) => `${row.stream} - ${row.entry_date} - $${Number(row.amount).toFixed(2)}`,
+    title: (row) => `${row.source || row.income_lane || row.stream} - ${row.entry_date} - $${Number(row.available_amount ?? row.amount ?? 0).toFixed(2)}`,
     fields: [
+      { source: "source", notion: "Source", kind: "select" },
       { source: "entry_date", notion: "Date", kind: "date" },
-      { source: "stream", notion: "Source", kind: "select" },
-      { source: "amount", notion: "Amount", kind: "number" },
+      { source: "gross_amount", notion: "Gross Amount", kind: "number" },
+      { source: "available_amount", notion: "Available Amount", kind: "number" },
+      { source: "income_lane", notion: "Income Lane", kind: "select" },
+      { source: "week_start", notion: "Week", kind: "date" },
+      { source: "month_start", notion: "Month", kind: "date" },
       { source: "payment_method", notion: "Payment Method", kind: "select" },
       { source: "proof_url", notion: "Proof", kind: "url" },
       { source: "notes", notion: "Notes" },
@@ -335,7 +346,7 @@ Deno.serve(async (request) => {
   };
 
   const setIntegration = async (
-    status: "Connected" | "Not Connected" | "Error",
+    status: ConnectionStatus,
     lastError: string | null,
     lastSyncAt: string | null = null,
   ) => {
@@ -354,7 +365,7 @@ Deno.serve(async (request) => {
   const setMapping = async (
     entity: string,
     values: {
-      status: "Connected" | "Not Connected" | "Error";
+      status: ConnectionStatus;
       last_error: string | null;
       last_sync_at?: string | null;
       verified_at?: string | null;
@@ -375,8 +386,8 @@ Deno.serve(async (request) => {
 
   if (!notionToken) {
     const detail = "NOTION_TOKEN is not configured in Supabase Edge Function secrets.";
-    await setIntegration("Not Connected", detail);
-    if (entity) await setMapping(entity, { status: "Not Connected", last_error: detail });
+    await setIntegration("Needs Setup", detail);
+    if (entity) await setMapping(entity, { status: "Needs Setup", last_error: detail });
     await audit("failed", detail, entity || null);
     return json({ connected: false, error: detail }, 503);
   }
@@ -384,7 +395,7 @@ Deno.serve(async (request) => {
   try {
     const bot = await notionRequest(notionToken, "/users/me");
     notionVerified = true;
-    await setIntegration("Connected", null);
+    await setIntegration("Verified Live", null);
 
     if (!entity) {
       const detail = `Verified Notion integration: ${bot?.name || bot?.type || "bot user"}.`;
@@ -403,12 +414,15 @@ Deno.serve(async (request) => {
       .maybeSingle();
     if (mappingError) throw mappingError;
     if (!mapping) throw new Error(`No Notion mapping exists for ${entity}.`);
+    if (entity === "daily_checkins" && mapping.target_ref !== DAILY_DRIVER_PAGE_ID) {
+      throw new Error(`Daily Driver must use Notion page ${DAILY_DRIVER_PAGE_ID}. Current mapping is ${mapping.target_ref}.`);
+    }
 
     if (entity === "daily_checkins") {
       const page = await notionRequest(notionToken, `/pages/${mapping.target_ref}`);
       const verifiedAt = new Date().toISOString();
       await setMapping(entity, {
-        status: "Connected",
+        status: "Verified Live",
         last_error: null,
         verified_at: verifiedAt,
       });
@@ -440,12 +454,12 @@ Deno.serve(async (request) => {
       const completedAt = new Date().toISOString();
       const detail = `Daily Driver plan ${row.id} appended to the verified Notion page.`;
       await setMapping(entity, {
-        status: "Connected",
+        status: "Verified Live",
         last_error: null,
         last_sync_at: completedAt,
         verified_at: verifiedAt,
       });
-      await setIntegration("Connected", null, completedAt);
+      await setIntegration("Verified Live", null, completedAt);
       await audit("success", detail, entity);
       return json({
         connected: true,
@@ -463,7 +477,7 @@ Deno.serve(async (request) => {
       const page = await notionRequest(notionToken, `/pages/${mapping.target_ref}`);
       const verifiedAt = new Date().toISOString();
       await setMapping(entity, {
-        status: "Connected",
+        status: "Verified Live",
         last_error: null,
         verified_at: verifiedAt,
       });
@@ -491,12 +505,12 @@ Deno.serve(async (request) => {
       const completedAt = new Date().toISOString();
       const detail = `CRM snapshot appended ${rows?.length ?? 0} leads to the verified Notion page.`;
       await setMapping(entity, {
-        status: "Connected",
+        status: "Verified Live",
         last_error: null,
         last_sync_at: completedAt,
         verified_at: verifiedAt,
       });
-      await setIntegration("Connected", null, completedAt);
+      await setIntegration("Verified Live", null, completedAt);
       await audit("success", detail, entity);
       return json({
         connected: true,
@@ -525,7 +539,7 @@ Deno.serve(async (request) => {
 
     const verifiedAt = new Date().toISOString();
     await setMapping(entity, {
-      status: "Connected",
+      status: "Verified Live",
       last_error: null,
       verified_at: verifiedAt,
     });
@@ -553,8 +567,8 @@ Deno.serve(async (request) => {
     if (!rows?.length) {
       const completedAt = new Date().toISOString();
       const detail = `No Huey HQ records were available for ${entity}; nothing was written to Notion.`;
-      await setMapping(entity, { status: "Connected", last_error: null, last_sync_at: completedAt });
-      await setIntegration("Connected", null, completedAt);
+      await setMapping(entity, { status: "Verified Live", last_error: null, last_sync_at: completedAt });
+      await setIntegration("Verified Live", null, completedAt);
       await audit("skipped", detail, entity);
       return json({ connected: true, synced: true, entity, created: 0, updated: 0, skipped: 0, failed: 0, detail });
     }
@@ -641,8 +655,8 @@ Deno.serve(async (request) => {
     }
 
     const detail = `${entity} sync complete: ${created} created, ${updated} updated, ${skippedFields} optional fields skipped.`;
-    await setMapping(entity, { status: "Connected", last_error: null, last_sync_at: completedAt });
-    await setIntegration("Connected", null, completedAt);
+    await setMapping(entity, { status: "Verified Live", last_error: null, last_sync_at: completedAt });
+    await setIntegration("Verified Live", null, completedAt);
     await audit("success", detail, entity);
     return json({ connected: true, synced: true, entity, created, updated, skipped: skippedFields, failed: 0, detail });
   } catch (error) {

@@ -13,7 +13,7 @@ const mapping = (
   overrides: Partial<NotionMappingHealth> = {},
 ): NotionMappingHealth => ({
   entity,
-  status: "Connected",
+  status: "Verified Live",
   last_sync_at: "2026-07-01T12:00:00.000Z",
   last_error: null,
   verified_at: "2026-07-01T11:59:00.000Z",
@@ -21,10 +21,10 @@ const mapping = (
 });
 
 describe("CEO Dashboard Notion health", () => {
-  it("reports Connected only when every area has live verification", () => {
+  it("reports Verified Live only when every area has live verification", () => {
     const mappings = NOTION_ENTITIES.map((entity) => mapping(entity.key));
     expect(getNotionHealth(mappings)).toMatchObject({
-      status: "Connected",
+      status: "Verified Live",
       connectedCount: 10,
     });
   });
@@ -33,7 +33,7 @@ describe("CEO Dashboard Notion health", () => {
     const mappings = NOTION_ENTITIES.map((entity) => mapping(entity.key));
     mappings[4] = mapping(mappings[4].entity, { verified_at: null });
     expect(getNotionHealth(mappings)).toMatchObject({
-      status: "Not Connected",
+      status: "Needs Setup",
       connectedCount: 9,
     });
   });

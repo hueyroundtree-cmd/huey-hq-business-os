@@ -26,6 +26,7 @@ import {
   getNotionHealth,
   type NotionMappingHealth,
 } from "@/lib/dashboard";
+import type { ConnectionState } from "@/lib/connectionHealth";
 import { getNextFollowUps, getOpenPipelineValue, type LeadStatus } from "@/lib/crmPipeline";
 import {
   DEFAULT_SCORE_SETTINGS,
@@ -38,7 +39,7 @@ import {
   type DailyProgressMetrics,
 } from "@/lib/progress";
 
-type Integration = { provider: string; status: "Connected" | "Not Connected" | "Error"; last_sync_at: string | null };
+type Integration = { provider: string; status: ConnectionState; last_sync_at: string | null };
 
 type AreaSummary = {
   key: NotionEntityKey;
@@ -257,7 +258,7 @@ export default function Dashboard() {
     if (params.get("endDay")) { setEndOpen(true); params.delete("endDay"); setParams(params, { replace: true }); }
   }, [params]);
 
-  const bankConnected = useMemo(() => integrations.some(i => ["Square", "Shopify", "Stan Store"].includes(i.provider) && i.status === "Connected"), [integrations]);
+  const bankConnected = useMemo(() => integrations.some(i => ["Square", "Shopify", "Stan Store"].includes(i.provider) && i.status === "Verified Live"), [integrations]);
   const notionHealth = useMemo(() => getNotionHealth(notionMappings), [notionMappings]);
   const notionStatus = notionHealth.status;
   const lastNotionSync = notionHealth.lastSync;
@@ -293,7 +294,7 @@ export default function Dashboard() {
       score >= 40 ? "Momentum is building." :
       "Start with today's first verified action.";
     const calendar = integrations.find((item) => item.provider === "Google Calendar");
-    return { greeting, score, grade, calendarConnected: calendar?.status === "Connected" };
+    return { greeting, score, grade, calendarConnected: calendar?.status === "Verified Live" };
   }, [topTasks, morning, evening, revToday, jobsToday, newLeads, contactedToday, contentDue, integrations]);
 
   const dailyPlan = useMemo<DailyPlan>(() => {
@@ -341,7 +342,7 @@ export default function Dashboard() {
 
   const pushPlanToNotion = async () => {
     const mapping = notionMappings.find((item) => item.entity === "daily_checkins");
-    if (mapping?.status !== "Connected" || !mapping.verified_at) {
+    if (mapping?.status !== "Verified Live" || !mapping.verified_at) {
       toast.error("Daily Driver Notion sync is not verified yet.", {
         description: "Open Manage sync, verify Daily Driver, then try again.",
       });
@@ -412,7 +413,7 @@ export default function Dashboard() {
                 <MissionMetric label="Jobs" value={String(jobsToday)} icon={Wrench} />
                 <MissionMetric label="Leads" value={String(newLeads)} icon={Users} />
                 <MissionMetric label="Appointments" value={String(appointmentsScheduled)} icon={CalendarPlus} />
-                <MissionMetric label="Calendar" value={missionControl.calendarConnected ? "Connected" : "Not connected"} icon={CalendarDays} />
+                <MissionMetric label="Calendar" value={missionControl.calendarConnected ? "Verified Live" : "Needs Setup"} icon={CalendarDays} />
                 <MissionMetric label="Follow Ups" value={String(followUpsDue)} icon={Bell} />
                 <MissionMetric label="Contacts Today" value={String(contactedToday)} icon={Send} />
                 <MissionMetric label="Videos" value={String(contentDue)} icon={Video} />
@@ -582,7 +583,7 @@ export default function Dashboard() {
           </div>
         </section>
 
-        <section className={`surface p-4 border-l-4 ${notionStatus === "Connected" ? "border-l-forest" : notionStatus === "Error" ? "border-l-destructive" : "border-l-gold"}`}>
+        <section className={`surface p-4 border-l-4 ${notionStatus === "Verified Live" ? "border-l-forest" : notionStatus === "Error" ? "border-l-destructive" : "border-l-gold"}`}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -590,15 +591,15 @@ export default function Dashboard() {
                 <ConnectionBadge status={notionStatus} lastSync={lastNotionSync} />
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
-                {notionStatus === "Connected"
+                {notionStatus === "Verified Live"
                   ? `All ${NOTION_ENTITIES.length} Notion areas have a verified live connection.`
                   : notionStatus === "Error"
                     ? "Notion connection needs attention. Open setup to review the latest error."
                     : `${connectedNotionAreas} of ${NOTION_ENTITIES.length} Notion areas are verified. Unconfigured areas remain clearly marked.`}
               </p>
             </div>
-            <Button asChild size="sm" variant={notionStatus === "Connected" ? "outline" : "default"} className="shrink-0">
-              <Link to="/integrations/notion">{notionStatus === "Connected" ? "Manage Notion" : "Configure Notion"}</Link>
+            <Button asChild size="sm" variant={notionStatus === "Verified Live" ? "outline" : "default"} className="shrink-0">
+              <Link to="/integrations/notion">{notionStatus === "Verified Live" ? "Manage Notion" : "Configure Notion"}</Link>
             </Button>
           </div>
         </section>
@@ -691,11 +692,11 @@ export default function Dashboard() {
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             {areaSummaries.map((area) => {
               const mapping = notionMappings.find((item) => item.entity === area.key);
-              const status = mapping?.status === "Connected" && mapping.verified_at
-                ? "Connected"
+              const status = mapping?.status === "Verified Live" && mapping.verified_at
+                ? "Verified Live"
                 : mapping?.status === "Error"
                   ? "Error"
-                  : "Not Connected";
+                  : "Needs Setup";
               const Icon = area.icon;
               return (
                 <Link key={area.key} to={area.to} className="surface group min-h-36 p-4 transition-colors hover:border-gold/50">
@@ -721,7 +722,7 @@ export default function Dashboard() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             {PROVIDERS.map((p) => {
               const rec = integrations.find(i => i.provider === p);
-              const status = (rec?.status ?? "Not Connected") as "Connected" | "Not Connected" | "Error";
+              const status = (rec?.status ?? "Needs Setup") as ConnectionState;
               return (
                 <div key={p} className="flex items-center justify-between gap-2 rounded-md border bg-background p-2 text-sm">
                   <span className="truncate">{p}</span>

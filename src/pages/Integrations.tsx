@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
+import type { ConnectionState } from "@/lib/connectionHealth";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import { AlertTriangle } from "lucide-react";
@@ -23,7 +24,7 @@ const PROVIDERS: { key: string; blurb: string; docs: string[] }[] = [
   { key: "Google Business Profile", blurb: "Track reviews and messages.", docs: ["Read reviews.", "No writes yet."] },
 ];
 
-type Integration = { id?: string; provider: string; status: "Not Connected" | "Connected" | "Error"; last_sync_at: string | null; last_error: string | null; config: any };
+type Integration = { id?: string; provider: string; status: ConnectionState; last_sync_at: string | null; last_error: string | null; config: any };
 
 export default function Integrations() {
   const [rows, setRows] = useState<Record<string, Integration>>({});
@@ -59,14 +60,14 @@ export default function Integrations() {
     if (detail.token) cfg.token_status = "pending_secret";
     const payload = {
       user_id: uid, provider,
-      status: "Not Connected" as const,
+      status: "Needs Setup" as const,
       config: cfg,
     };
     const res = existing?.id
       ? await supabase.from("integrations").update({ config: cfg }).eq("id", existing.id)
       : await supabase.from("integrations").insert(payload);
     if (res.error) return toast.error(res.error.message);
-    toast.success("Configuration saved. Status stays Not Connected until an authorized backend token is added.");
+    toast.success("Configuration saved. Status stays Needs Setup until an authorized backend token is added.");
     setOpen(null); load();
   };
 
@@ -77,14 +78,14 @@ export default function Integrations() {
         <div className="surface p-3 border-warning/30 bg-warning/5 text-xs flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
           <div>
-            Tokens for third-party services are stored server-side as project secrets, never in your browser. This first release provides a secure setup screen and configuration checklist. Live OAuth handshakes will be added service-by-service; until then, each integration stays honestly labeled Not Connected.
+            Tokens for third-party services are stored server-side as project secrets, never in your browser. This first release provides a secure setup screen and configuration checklist. Live OAuth handshakes will be added service-by-service; until then, each integration stays honestly labeled Needs Setup.
           </div>
         </div>
 
         <div className="grid md:grid-cols-2 gap-3">
           {PROVIDERS.map(p => {
             const rec = rows[p.key];
-            const status = (rec?.status ?? "Not Connected") as "Connected" | "Not Connected" | "Error";
+            const status = (rec?.status ?? "Needs Setup") as ConnectionState;
             return (
               <div key={p.key} className="surface p-4">
                 <div className="flex items-start justify-between gap-2">
@@ -112,7 +113,7 @@ export default function Integrations() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Configure {open}</DialogTitle>
-            <DialogDescription>Saves your mapping. Tokens must be added to project secrets by an admin — never entered in the browser.</DialogDescription>
+            <DialogDescription>Saves your mapping. Tokens must be added to project secrets by an admin â€” never entered in the browser.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             {open === "Notion" && (
@@ -123,7 +124,7 @@ export default function Integrations() {
             )}
             <div><Label className="text-xs">Notes for this integration</Label><Textarea rows={2} value={detail.notes} onChange={(e) => setDetail({ ...detail, notes: e.target.value })} /></div>
             <div className="text-[11px] text-muted-foreground border-l-2 border-border pl-2">
-              Secret token setup: add <code className="font-mono">{open?.toUpperCase().split(" ").join("_")}_TOKEN</code> in Project Settings → Secrets. Status flips to Connected only after a live API response.
+              Secret token setup: add <code className="font-mono">{open?.toUpperCase().split(" ").join("_")}_TOKEN</code> in Project Settings → Secrets. Status flips to Verified Live only after a live API response.
             </div>
           </div>
           <DialogFooter>

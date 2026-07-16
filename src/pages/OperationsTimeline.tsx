@@ -70,7 +70,7 @@ export default function OperationsTimeline() {
                 <div className="text-sm text-muted-foreground">Events appear only after the database migration is connected.</div>
               </div>
             </div>
-            <ConnectionBadge status={error ? "Not Connected" : "Connected"} />
+            <ConnectionBadge status={error ? "Needs Setup" : "Verified Live"} />
           </div>
         </section>
 
