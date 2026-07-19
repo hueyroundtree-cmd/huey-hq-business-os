@@ -1018,8 +1018,9 @@ export default function CRM() {
             action={<Button size="sm" onClick={() => { setEditing(emptyLead); setActivities([]); setEmailHistory([]); setEmailComposer(buildEmailComposer()); setEditOpen(true); }}><Plus className="mr-1.5 h-4 w-4" />Add Lead</Button>}
           />
         ) : (
-          <div className="surface min-w-0 overflow-x-auto">
-            <table className="min-w-[44rem] w-full text-sm">
+          <div className="surface min-w-0 max-w-full overflow-hidden">
+            <div className="w-full overflow-x-auto">
+              <table className="min-w-[44rem] w-full text-sm">
               <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 text-left">Lead</th>
@@ -1052,7 +1053,8 @@ export default function CRM() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+              </table>
+            </div>
           </div>
         )}
       </div>
