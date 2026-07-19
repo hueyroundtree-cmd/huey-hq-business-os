@@ -887,7 +887,7 @@ export default function CRM() {
   }, [concordLeads]);
 
   return (
-    <div>
+    <div className="min-w-0 overflow-x-hidden">
       <PageHeader
         title="Command Center CRM"
         description="One shared pipeline for detailing, logistics, commerce, content, software and future business units."
