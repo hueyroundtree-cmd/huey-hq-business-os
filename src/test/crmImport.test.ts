@@ -1,4 +1,4 @@
-import { dryRunLeadImport } from "@/lib/crmImport";
+import { dryRunLeadImport, findLeadDuplicate } from "@/lib/crmImport";
 
 describe("CRM lead import dry run", () => {
   it("detects duplicate rows and missing contact details without inserting", () => {
@@ -23,5 +23,12 @@ describe("CRM lead import dry run", () => {
       status: "New Lead",
       lead_type: "Detailing",
     });
+  });
+
+  it("explains duplicate matches used by manual create and bulk import", () => {
+    expect(findLeadDuplicate(
+      { email: " Seller@Example.com ", phone: "(707) 555-0100" },
+      [{ email: "seller@example.com", phone: "7075550100" }],
+    )).toEqual({ duplicate: true, reasons: ["email", "phone"] });
   });
 });

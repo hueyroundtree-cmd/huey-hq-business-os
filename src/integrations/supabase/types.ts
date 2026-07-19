@@ -131,6 +131,99 @@ export type Database = {
         }
         Relationships: []
       }
+      crm_import_batches: {
+        Row: {
+          batch_name: string
+          completed_at: string | null
+          created_at: string
+          failed_rows: number
+          id: string
+          imported_rows: number
+          latest_error: string | null
+          merged_rows: number
+          original_headers: string | null
+          skipped_rows: number
+          source: string
+          status: string
+          total_rows: number
+          user_id: string
+        }
+        Insert: {
+          batch_name: string
+          completed_at?: string | null
+          created_at?: string
+          failed_rows?: number
+          id?: string
+          imported_rows?: number
+          latest_error?: string | null
+          merged_rows?: number
+          original_headers?: string | null
+          skipped_rows?: number
+          source: string
+          status?: string
+          total_rows?: number
+          user_id: string
+        }
+        Update: {
+          batch_name?: string
+          completed_at?: string | null
+          created_at?: string
+          failed_rows?: number
+          id?: string
+          imported_rows?: number
+          latest_error?: string | null
+          merged_rows?: number
+          original_headers?: string | null
+          skipped_rows?: number
+          source?: string
+          status?: string
+          total_rows?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
+      crm_import_reconciliation: {
+        Row: {
+          error_message: string | null
+          id: string
+          import_batch_id: string
+          lead_id: string | null
+          missing_fields: string[]
+          original_data: Json
+          outcome: string
+          previous_values: Json | null
+          reconciled_at: string
+          source_record_id: string
+          user_id: string
+        }
+        Insert: {
+          error_message?: string | null
+          id?: string
+          import_batch_id: string
+          lead_id?: string | null
+          missing_fields?: string[]
+          original_data: Json
+          outcome: string
+          previous_values?: Json | null
+          reconciled_at?: string
+          source_record_id: string
+          user_id: string
+        }
+        Update: {
+          error_message?: string | null
+          id?: string
+          import_batch_id?: string
+          lead_id?: string | null
+          missing_fields?: string[]
+          original_data?: Json
+          outcome?: string
+          previous_values?: Json | null
+          reconciled_at?: string
+          source_record_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       business_projects: {
         Row: {
           business: string | null
@@ -444,6 +537,7 @@ export type Database = {
           email_subject: string | null
           id: string
           industry: string | null
+          import_batch_id: string | null
           last_contact_at: string | null
           lead_score: number
           name: string
@@ -490,6 +584,7 @@ export type Database = {
           email_subject?: string | null
           id?: string
           industry?: string | null
+          import_batch_id?: string | null
           last_contact_at?: string | null
           lead_score?: number
           name: string
@@ -536,6 +631,7 @@ export type Database = {
           email_subject?: string | null
           id?: string
           industry?: string | null
+          import_batch_id?: string | null
           last_contact_at?: string | null
           lead_score?: number
           name?: string
