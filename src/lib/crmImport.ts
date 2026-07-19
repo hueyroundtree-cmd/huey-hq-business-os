@@ -30,6 +30,29 @@ export type ImportDryRunReport = {
   drafts: ImportLeadDraft[];
 };
 
+export type LeadDuplicateMatch = {
+  duplicate: boolean;
+  reasons: string[];
+};
+
+const digits = (value?: string | null) => value?.replace(/\D/g, "") ?? "";
+const lower = (value?: string | null) => value?.trim().toLowerCase() ?? "";
+
+export function findLeadDuplicate(
+  candidate: Partial<ImportLeadDraft>,
+  existing: Array<Partial<ImportLeadDraft>>,
+): LeadDuplicateMatch {
+  const reasons = new Set<string>();
+  for (const lead of existing) {
+    if (candidate.crm_id && lower(candidate.crm_id) === lower(lead.crm_id)) reasons.add("CRM ID");
+    if (candidate.source_record_id && lower(candidate.source_record_id) === lower(lead.source_record_id)) reasons.add("source record ID");
+    if (candidate.email && lower(candidate.email) === lower(lead.email)) reasons.add("email");
+    if (candidate.phone && digits(candidate.phone) && digits(candidate.phone) === digits(lead.phone)) reasons.add("phone");
+    if (candidate.source_url && lower(candidate.source_url) === lower(lead.source_url)) reasons.add("source URL");
+  }
+  return { duplicate: reasons.size > 0, reasons: [...reasons] };
+}
+
 const splitCsvLine = (line: string) => {
   const values: string[] = [];
   let current = "";
@@ -81,14 +104,6 @@ export function parseLeadCsv(csv: string): Record<string, string>[] {
 
 export function dryRunLeadImport(csv: string, existing: Array<Partial<ImportLeadDraft>>): ImportDryRunReport {
   const rows = parseLeadCsv(csv);
-  const existingKeys = new Set(
-    existing.flatMap((lead) => [
-      lead.crm_id ? `crm:${lead.crm_id.toLowerCase()}` : "",
-      lead.source_record_id ? `source:${lead.source_record_id.toLowerCase()}` : "",
-      lead.email ? `email:${lead.email.toLowerCase()}` : "",
-      lead.phone ? `phone:${lead.phone.replace(/\D/g, "")}` : "",
-    ].filter(Boolean)),
-  );
   const seenKeys = new Set<string>();
   const duplicateRows: number[] = [];
   const issues: ImportDryRunIssue[] = [];
@@ -115,9 +130,17 @@ export function dryRunLeadImport(csv: string, existing: Array<Partial<ImportLead
     if (!vehicle && !business) {
       issues.push({ row: rowNumber, severity: "warning", message: "Missing vehicle/business detail." });
     }
-    if (keys.some((key) => existingKeys.has(key) || seenKeys.has(key))) {
+    const existingMatch = findLeadDuplicate({
+      crm_id: crmId,
+      source_record_id: sourceRecordId,
+      email,
+      phone,
+      source_url: blankToNull(read(row, ["source_url", "url"])),
+    }, existing);
+    if (existingMatch.duplicate || keys.some((key) => seenKeys.has(key))) {
       duplicateRows.push(rowNumber);
-      issues.push({ row: rowNumber, severity: "error", message: "Potential duplicate by CRM ID, source record ID, phone, or email." });
+      const reason = existingMatch.reasons.length ? ` (${existingMatch.reasons.join(", ")})` : "";
+      issues.push({ row: rowNumber, severity: "error", message: `Potential duplicate by CRM ID, source record ID, phone, email, or source URL${reason}.` });
     }
     keys.forEach((key) => seenKeys.add(key));
 

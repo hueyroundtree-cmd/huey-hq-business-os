@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { money } from "@/lib/format";
-import { dryRunLeadImport, type ImportDryRunReport } from "@/lib/crmImport";
+import { dryRunLeadImport, findLeadDuplicate, type ImportDryRunReport } from "@/lib/crmImport";
 import { ZOHO_PRIMARY_SENDER, duplicateSendMessage, saveZohoDraft, sendZohoEmail, syncZohoReplyManually } from "@/lib/zohoMail";
 import {
   BUSINESS_UNITS,
@@ -258,6 +258,7 @@ export default function CRM() {
   const [importOpen, setImportOpen] = useState(false);
   const [importCsv, setImportCsv] = useState("");
   const [importReport, setImportReport] = useState<ImportDryRunReport | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [params, setParams] = useSearchParams();
 
@@ -398,6 +399,19 @@ export default function CRM() {
     const movedToContacted = payload.status === "Contacted" && previous?.status !== "Contacted";
     const movedToBooked = payload.status === "Booked" && previous?.status !== "Booked";
     const movedToReplied = payload.outreach_status === "Replied" && previous?.outreach_status !== "Replied";
+
+    if (isNew) {
+      const { data: currentLeads, error: duplicateCheckError } = await supabase
+        .from("leads")
+        .select("crm_id,source_record_id,source_url,email,phone");
+      if (duplicateCheckError) return toast.error(`Duplicate check failed: ${duplicateCheckError.message}`);
+      const match = findLeadDuplicate(payload, currentLeads ?? []);
+      if (match.duplicate) {
+        return toast.error("Potential duplicate lead blocked", {
+          description: `Matched an existing lead by ${match.reasons.join(", ")}. Merge verified details into that record.`,
+        });
+      }
+    }
 
     if (movedToContacted) {
       payload.last_contact_at = payload.last_contact_at || nowIso;
@@ -773,6 +787,81 @@ export default function CRM() {
     else toast.success(`Dry run complete: ${report.readyRows}/${report.totalRows} rows ready`);
   };
 
+  const commitImport = async () => {
+    if (!importReport?.readyRows) return toast.error("Run a dry run with at least one import-ready row first.");
+    const skipped = importReport.duplicateRows.length;
+    if (!window.confirm(`Import ${importReport.readyRows} reviewed rows and skip ${skipped} duplicate row${skipped === 1 ? "" : "s"}? No outreach will be sent.`)) return;
+
+    setImportBusy(true);
+    const { data: auth } = await supabase.auth.getUser();
+    if (!auth.user) {
+      setImportBusy(false);
+      return toast.error("Sign in again before importing.");
+    }
+
+    const batchName = `CRM_UI_${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    const batchResult = await supabase.from("crm_import_batches").insert({
+      user_id: auth.user.id,
+      batch_name: batchName,
+      source: "CRM Bulk Import",
+      status: "Running",
+      total_rows: importReport.totalRows,
+      skipped_rows: skipped,
+      original_headers: importCsv.split(/\r?\n/, 1)[0] ?? "",
+    }).select("id").single();
+    if (batchResult.error) {
+      setImportBusy(false);
+      return toast.error("Import batch storage needs setup", { description: batchResult.error.message });
+    }
+
+    const duplicateRows = new Set(importReport.duplicateRows);
+    const readyDrafts = importReport.drafts.filter((_, index) => !duplicateRows.has(index + 2));
+    const leadResult = await supabase.from("leads").insert(readyDrafts.map((draft) => ({
+      ...draft,
+      user_id: auth.user.id,
+      import_batch_id: batchResult.data.id,
+      date_added: new Date().toISOString().slice(0, 10),
+      outreach_status: "Not Contacted",
+      zoho_email_sent: false,
+      deposit_status: "Not Requested",
+      appointment_status: "Not Scheduled",
+      next_action: "Review lead and choose a verified outreach method",
+    }))).select("id,name,source_record_id");
+
+    if (leadResult.error) {
+      await supabase.from("crm_import_batches").update({
+        status: "Failed",
+        failed_rows: readyDrafts.length,
+        latest_error: leadResult.error.message,
+        completed_at: new Date().toISOString(),
+      }).eq("id", batchResult.data.id);
+      setImportBusy(false);
+      return toast.error("No leads were imported", { description: leadResult.error.message });
+    }
+
+    const imported = leadResult.data ?? [];
+    if (imported.length) {
+      await supabase.from("lead_activities").insert(imported.map((lead: { id: string; name: string; source_record_id: string | null }) => ({
+        user_id: auth.user!.id,
+        lead_id: lead.id,
+        kind: "Lead imported",
+        detail: `${lead.source_record_id ?? lead.name} imported in reviewed batch ${batchName}; outreach not sent.`,
+      })));
+    }
+    await supabase.from("crm_import_batches").update({
+      status: "Completed",
+      imported_rows: imported.length,
+      completed_at: new Date().toISOString(),
+    }).eq("id", batchResult.data.id);
+
+    setImportBusy(false);
+    setImportOpen(false);
+    setImportCsv("");
+    setImportReport(null);
+    await Promise.all([load(), loadCrmActivities()]);
+    toast.success("Bulk import completed", { description: `${imported.length} imported, ${skipped} duplicates skipped. No outreach was sent.` });
+  };
+
   const openPipeline = getOpenPipelineValue(leads);
   const concordLeads = useMemo(() => leads.filter(isConcordLead), [leads]);
   const workflowSummary = useMemo(() => CRM_WORKFLOW_STAGES.map((workflow) => ({
@@ -999,6 +1088,8 @@ export default function CRM() {
         setCsv={setImportCsv}
         report={importReport}
         onDryRun={runImportDryRun}
+        onCommit={commitImport}
+        busy={importBusy}
       />
     </div>
   );
@@ -1028,7 +1119,7 @@ function buildEmailComposer(lead?: Partial<Lead>): EmailComposer {
       "",
       "We come directly to your office or home, and services start at $100.",
       "",
-      "You can learn more at https://gfldetail.com.",
+      "Book or view availability at https://bay-area-102518.square.site.",
       "",
       "Thank you,",
       "Huey Roundtree III",
@@ -1332,20 +1423,22 @@ function MarkContactedDialog({ lead, draft, setDraft, onClose, onSave }: {
   );
 }
 
-function BulkImportDialog({ open, onOpenChange, csv, setCsv, report, onDryRun }: {
+function BulkImportDialog({ open, onOpenChange, csv, setCsv, report, onDryRun, onCommit, busy }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   csv: string;
   setCsv: (value: string) => void;
   report: ImportDryRunReport | null;
   onDryRun: () => void;
+  onCommit: () => void;
+  busy: boolean;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Bulk Import Leads — Dry Run Only</DialogTitle>
-          <DialogDescription>Paste CSV rows here to validate duplicates and missing fields. This does not insert leads.</DialogDescription>
+          <DialogTitle>Bulk Import Leads</DialogTitle>
+          <DialogDescription>Preview and validate first. Import commits only reviewed, non-duplicate rows and never sends outreach.</DialogDescription>
         </DialogHeader>
         <Textarea
           rows={10}
@@ -1371,13 +1464,14 @@ function BulkImportDialog({ open, onOpenChange, csv, setCsv, report, onDryRun }:
               </div>
             )}
             <p className="mt-3 text-xs text-muted-foreground">
-              Import commit remains blocked until Huey approves the dry-run report.
+              Duplicate rows will be skipped. Merge verified details into the existing record instead of overwriting it here.
             </p>
           </section>
         )}
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
-          <Button onClick={onDryRun}>Run Dry-Run Report</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>Close</Button>
+          <Button variant="outline" onClick={onDryRun} disabled={busy}>Run Dry-Run Report</Button>
+          <Button onClick={onCommit} disabled={busy || !report?.readyRows}>{busy ? "Importing..." : "Import Reviewed Rows"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
