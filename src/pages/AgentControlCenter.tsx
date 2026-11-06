@@ -1,4 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,41 +11,68 @@ import { AGENTS, routeTask, requiresOwnerApproval, type DelegatedTask, type Agen
 const ACTIONS: AgentAction[] = ["research", "draft", "organize", "internal_update", "client_contact", "publish", "spend", "transfer", "trade", "external_commitment", "change_settings", "delete"];
 
 export default function AgentControlCenter() {
+  const { user } = useAuth();
   const [description, setDescription] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [action, setAction] = useState<AgentAction>("draft");
   const [tasks, setTasks] = useState<DelegatedTask[]>([]);
   const [evidence, setEvidence] = useState<Record<string, string>>({});
-  const addTask = () => {
-    const title = description.trim();
-    if (!title) return;
-    const route = routeTask(title);
-    setTasks((current) => [{
-      id: crypto.randomUUID(), source: "manual preview", title,
-      department: route.department, assignedAgentId: route.agentId,
-      status: requiresOwnerApproval(action) ? "awaiting_approval" : "assigned", action,
-    }, ...current]);
-    setDescription("");
+  // agent_tasks is created by the accompanying migration. Refresh generated Supabase types after deployment.
+  const taskDb = supabase as unknown as { from: (table: string) => any };
+  const refresh = async () => {
+    if (!user) return;
+    const result = await taskDb.from("agent_tasks").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(100);
+    if (result.error) { setError(result.error.message); return; }
+    setError(null);
+    setTasks((result.data ?? []).map((item: any) => ({
+      id: item.id, source: item.source, title: item.title, department: item.department,
+      assignedAgentId: item.assigned_agent_id, status: item.status, action: item.action,
+      evidenceUrl: item.evidence_url, approvedByOwner: item.approved_by_owner,
+    })));
   };
-  const approve = (id: string) => setTasks((current) => current.map((task) =>
-    task.id === id ? { ...task, approvedByOwner: true, status: "assigned" } : task));
-  const markComplete = (id: string) => setTasks((current) => current.map((task) =>
-    task.id === id && evidence[id]?.trim() && (!requiresOwnerApproval(task.action) || task.approvedByOwner)
-      ? { ...task, evidenceUrl: evidence[id].trim(), status: "verified_complete" } : task));
+  useEffect(() => { void refresh(); }, [user?.id]);
+  const addTask = async () => {
+    if (!user || !description.trim()) return;
+    const route = routeTask(description.trim());
+    const result = await taskDb.from("agent_tasks").insert({
+      user_id: user.id, title: description.trim(), source: "manual",
+      department: route.department, assigned_agent_id: route.agentId, action,
+      status: requiresOwnerApproval(action) ? "awaiting_approval" : "assigned",
+    });
+    if (result.error) return toast.error(result.error.message);
+    setDescription("");
+    await refresh();
+  };
+  const approve = async (id: string) => {
+    if (!user) return;
+    const result = await taskDb.from("agent_tasks").update({ approved_by_owner: true, status: "assigned" }).eq("id", id).eq("user_id", user.id);
+    if (result.error) toast.error(result.error.message);
+    else await refresh();
+  };
+  const markComplete = async (id: string) => {
+    if (!user || !evidence[id]?.trim()) return;
+    const task = tasks.find((item) => item.id === id);
+    if (!task || (requiresOwnerApproval(task.action) && !task.approvedByOwner)) return;
+    const result = await taskDb.from("agent_tasks").update({ evidence_url: evidence[id].trim(), status: "verified_complete" }).eq("id", id).eq("user_id", user.id);
+    if (result.error) toast.error(result.error.message);
+    else await refresh();
+  };
 
   return (
     <div>
-      <PageHeader title="Agent Control Center" description="Preview routing and approvals. Tasks on this screen are temporary and do not trigger real agent actions." />
+      <PageHeader title="Agent Control Center" description="Manage saved task assignments and approvals. No real agent actions are executed." />
       <div className="p-4 md:p-6 space-y-5">
         <div className="surface p-4 space-y-3">
           <h2 className="font-medium">Chief of Staff intake — preview</h2>
-          <p className="text-xs text-muted-foreground">No messages are sent, trades placed, content published, or database records written. Tasks disappear on refresh until backend storage is implemented.</p>
+          <p className="text-xs text-muted-foreground">Tasks persist in Supabase after migration. Approval records permission only: no messages, trades, purchases or publishing are executed.</p>
           <Label htmlFor="agent-task">Task request</Label>
           <Input id="agent-task" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Example: draft a client follow-up" />
           <Label htmlFor="agent-action">Requested action</Label>
           <select id="agent-action" className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={action} onChange={(e) => setAction(e.target.value as AgentAction)}>
             {ACTIONS.map((item) => <option key={item} value={item}>{item.replaceAll("_", " ")}{requiresOwnerApproval(item) ? " — approval required" : ""}</option>)}
           </select>
-          <Button onClick={addTask} disabled={!description.trim()}>Preview assignment</Button>
+          <Button onClick={addTask} disabled={!description.trim() || !user}>Save assignment</Button>
+          {error && <p role="alert" className="text-xs text-destructive">Task storage unavailable: {error}. Apply the migration first.</p>}
         </div>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {AGENTS.map((agent) => <div className="surface p-4 space-y-1" key={agent.id}>
@@ -53,16 +83,16 @@ export default function AgentControlCenter() {
           </div>)}
         </div>
         <div className="surface p-4 space-y-3">
-          <h2 className="font-medium">Task queue — local preview only</h2>
-          {tasks.length === 0 && <p className="text-sm text-muted-foreground">No preview tasks. Add a task above to see routing and approval requirements.</p>}
+          <h2 className="font-medium">Task queue — saved assignments</h2>
+          {tasks.length === 0 && <p className="text-sm text-muted-foreground">No saved assignments yet.</p>}
           {tasks.map((task) => <div key={task.id} className="border rounded-md p-3 space-y-2">
             <div className="font-medium text-sm">{task.title}</div>
             <div className="text-xs text-muted-foreground">Assigned: {AGENTS.find((a) => a.id === task.assignedAgentId)?.name} · {task.department} · {task.status.replaceAll("_", " ")}</div>
-            {requiresOwnerApproval(task.action) && !task.approvedByOwner && <Button size="sm" variant="outline" onClick={() => approve(task.id)}>Approve preview action (no execution)</Button>}
+            {requiresOwnerApproval(task.action) && !task.approvedByOwner && <Button size="sm" variant="outline" onClick={() => approve(task.id)}>Record approval (no execution)</Button>}
             {task.status !== "verified_complete" && <div className="space-y-2">
               <Label htmlFor={`evidence-${task.id}`}>Evidence URL or reference</Label>
               <Input id={`evidence-${task.id}`} value={evidence[task.id] ?? ""} onChange={(e) => setEvidence((current) => ({ ...current, [task.id]: e.target.value }))} placeholder="Verified work reference" />
-              <Button size="sm" variant="outline" disabled={!evidence[task.id]?.trim() || (requiresOwnerApproval(task.action) && !task.approvedByOwner)} onClick={() => markComplete(task.id)}>Mark verified (preview)</Button>
+              <Button size="sm" variant="outline" disabled={!evidence[task.id]?.trim() || (requiresOwnerApproval(task.action) && !task.approvedByOwner)} onClick={() => markComplete(task.id)}>Mark verified with evidence</Button>
             </div>}
           </div>)}
         </div>
