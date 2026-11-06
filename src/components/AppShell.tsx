@@ -23,6 +23,7 @@ const NAV = [
   { to: "/content", label: "Content Creator OS", icon: FileText },
   { to: "/revenue", label: "Finance", icon: DollarSign },
   { to: "/executive", label: "Executive", icon: Bot },
+  { to: "/agents", label: "Agent Control", icon: Bot },
   { to: "/automations", label: "Automations", icon: Zap },
   { to: "/knowledge", label: "Knowledge", icon: BookOpen },
   { to: "/roadmap", label: "Roadmap", icon: Map },
