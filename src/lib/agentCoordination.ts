@@ -25,7 +25,7 @@ export interface DelegatedTask {
 }
 
 export const AGENTS: readonly AgentDefinition[] = [
-  { id: "ceo", name: "CEO / Chief of Staff", department: "executive", responsibilities: ["intake", "prioritization", "delegation", "reporting"], status: "existing" },
+  { id: "ceo", name: "Malcolm Shakur — CEO / Chief of Staff", department: "executive", responsibilities: ["owner reporting", "specialist intake", "prioritization", "delegation", "evidence review", "daily briefing"], status: "existing" },
   { id: "sales", name: "Sales", department: "revenue", responsibilities: ["lead qualification", "follow-up drafts", "quotes"], status: "existing" },
   { id: "detailing", name: "Detailing", department: "operations", responsibilities: ["service planning", "job readiness", "detailing leads"], status: "existing" },
   { id: "content", name: "Content", department: "marketing", responsibilities: ["short-form scripts", "content planning"], status: "existing" },
