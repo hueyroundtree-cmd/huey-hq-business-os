@@ -61,8 +61,7 @@ export default function Executive() {
   useEffect(() => {
     if (!user) { setAgentTasks([]); return; }
     let alive = true;
-    const db = supabase as unknown as { from: (name: string) => any };
-    db.from("agent_tasks").select("id,title,source,assigned_agent_id,department,status,evidence_url,created_at,approved_by_owner").eq("user_id", user.id).order("created_at", { ascending: false }).limit(100).then(({ data, error }: any) => {
+    supabase.from("agent_tasks").select("id,title,source,assigned_agent_id,department,status,evidence_url,created_at,approved_by_owner").eq("user_id", user.id).order("created_at", { ascending: false }).limit(100).then(({ data, error }: any) => {
       if (!alive) return;
       setAgentError(error?.message ?? null);
       setAgentTasks(data ?? []);
