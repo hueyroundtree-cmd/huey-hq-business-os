@@ -17,11 +17,9 @@ export default function AgentControlCenter() {
   const [action, setAction] = useState<AgentAction>("draft");
   const [tasks, setTasks] = useState<DelegatedTask[]>([]);
   const [evidence, setEvidence] = useState<Record<string, string>>({});
-  // agent_tasks is created by the accompanying migration. Refresh generated Supabase types after deployment.
-  const taskDb = supabase as unknown as { from: (table: string) => any };
   const refresh = async () => {
     if (!user) return;
-    const result = await taskDb.from("agent_tasks").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(100);
+    const result = await supabase.from("agent_tasks").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(100);
     if (result.error) { setError(result.error.message); return; }
     setError(null);
     setTasks((result.data ?? []).map((item: any) => ({
@@ -34,7 +32,7 @@ export default function AgentControlCenter() {
   const addTask = async () => {
     if (!user || !description.trim()) return;
     const route = routeTask(description.trim());
-    const result = await taskDb.from("agent_tasks").insert({
+    const result = await supabase.from("agent_tasks").insert({
       user_id: user.id, title: description.trim(), source: "manual",
       department: route.department, assigned_agent_id: route.agentId, action,
       status: requiresOwnerApproval(action) ? "awaiting_approval" : "assigned",
@@ -45,7 +43,7 @@ export default function AgentControlCenter() {
   };
   const approve = async (id: string) => {
     if (!user) return;
-    const result = await taskDb.from("agent_tasks").update({ approved_by_owner: true, status: "assigned" }).eq("id", id).eq("user_id", user.id);
+    const result = await supabase.from("agent_tasks").update({ approved_by_owner: true, status: "assigned" }).eq("id", id).eq("user_id", user.id);
     if (result.error) toast.error(result.error.message);
     else await refresh();
   };
@@ -53,7 +51,7 @@ export default function AgentControlCenter() {
     if (!user || !evidence[id]?.trim()) return;
     const task = tasks.find((item) => item.id === id);
     if (!task || (requiresOwnerApproval(task.action) && !task.approvedByOwner)) return;
-    const result = await taskDb.from("agent_tasks").update({ evidence_url: evidence[id].trim(), status: "working" }).eq("id", id).eq("user_id", user.id);
+    const result = await supabase.from("agent_tasks").update({ evidence_url: evidence[id].trim(), status: "working" }).eq("id", id).eq("user_id", user.id);
     if (result.error) toast.error(result.error.message);
     else await refresh();
   };
