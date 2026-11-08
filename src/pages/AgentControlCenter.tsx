@@ -49,11 +49,11 @@ export default function AgentControlCenter() {
     if (result.error) toast.error(result.error.message);
     else await refresh();
   };
-  const markComplete = async (id: string) => {
+  const submitEvidence = async (id: string) => {
     if (!user || !evidence[id]?.trim()) return;
     const task = tasks.find((item) => item.id === id);
     if (!task || (requiresOwnerApproval(task.action) && !task.approvedByOwner)) return;
-    const result = await taskDb.from("agent_tasks").update({ evidence_url: evidence[id].trim(), status: "verified_complete" }).eq("id", id).eq("user_id", user.id);
+    const result = await taskDb.from("agent_tasks").update({ evidence_url: evidence[id].trim(), status: "working" }).eq("id", id).eq("user_id", user.id);
     if (result.error) toast.error(result.error.message);
     else await refresh();
   };
@@ -64,7 +64,7 @@ export default function AgentControlCenter() {
       <div className="p-4 md:p-6 space-y-5">
         <div className="surface p-4 space-y-3">
           <h2 className="font-medium">Chief of Staff intake — preview</h2>
-          <p className="text-xs text-muted-foreground">Tasks persist in Supabase after migration. Approval records permission only: no messages, trades, purchases or publishing are executed.</p>
+          <p className="text-xs text-muted-foreground">Tasks persist in Supabase. Approval records permission only: no messages, trades, purchases or publishing are executed. Evidence submissions are not independent verification.</p>
           <Label htmlFor="agent-task">Task request</Label>
           <Input id="agent-task" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Example: draft a client follow-up" />
           <Label htmlFor="agent-action">Requested action</Label>
@@ -83,16 +83,16 @@ export default function AgentControlCenter() {
           </div>)}
         </div>
         <div className="surface p-4 space-y-3">
-          <h2 className="font-medium">Task queue — saved assignments</h2>
-          {tasks.length === 0 && <p className="text-sm text-muted-foreground">No saved assignments yet.</p>}
+          <h2 className="font-medium">Task queue — saved assignments and reported work</h2>
+          {tasks.length === 0 && <p className="text-sm text-muted-foreground">No saved assignments yet. Claude report rows appear here once loaded with your signed-in account.</p>}
           {tasks.map((task) => <div key={task.id} className="border rounded-md p-3 space-y-2">
             <div className="font-medium text-sm">{task.title}</div>
-            <div className="text-xs text-muted-foreground">Assigned: {AGENTS.find((a) => a.id === task.assignedAgentId)?.name} · {task.department} · {task.status.replaceAll("_", " ")}</div>
+            <div className="text-xs text-muted-foreground">Assigned: {AGENTS.find((a) => a.id === task.assignedAgentId)?.name ?? task.assignedAgentId} · {task.department} · {task.status.replaceAll("_", " ")}{task.evidenceUrl ? " · evidence submitted (not independently verified)" : " · no evidence"}</div>
             {requiresOwnerApproval(task.action) && !task.approvedByOwner && <Button size="sm" variant="outline" onClick={() => approve(task.id)}>Record approval (no execution)</Button>}
             {task.status !== "verified_complete" && <div className="space-y-2">
               <Label htmlFor={`evidence-${task.id}`}>Evidence URL or reference</Label>
               <Input id={`evidence-${task.id}`} value={evidence[task.id] ?? ""} onChange={(e) => setEvidence((current) => ({ ...current, [task.id]: e.target.value }))} placeholder="Verified work reference" />
-              <Button size="sm" variant="outline" disabled={!evidence[task.id]?.trim() || (requiresOwnerApproval(task.action) && !task.approvedByOwner)} onClick={() => markComplete(task.id)}>Mark verified with evidence</Button>
+              <Button size="sm" variant="outline" disabled={!evidence[task.id]?.trim() || (requiresOwnerApproval(task.action) && !task.approvedByOwner)} onClick={() => submitEvidence(task.id)}>Submit evidence for review (not verified)</Button>
             </div>}
           </div>)}
         </div>
