@@ -2,7 +2,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Users, DollarSign, FileText, ScrollText, Bot, Zap,
   BookOpen, Map, Settings, Plug, LogOut, Menu, Sun, Moon, PlusCircle,
-  BriefcaseBusiness, PackageOpen, Activity, HeartPulse, Search, TrendingUp
+  BriefcaseBusiness, PackageOpen, Activity, HeartPulse, Search, TrendingUp, ClipboardCheck
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ const NAV = [
   { to: "/content", label: "Content Creator OS", icon: FileText },
   { to: "/revenue", label: "Finance", icon: DollarSign },
   { to: "/executive", label: "Executive", icon: Bot },
+  { to: "/agent-desk", label: "Agent Desk", icon: ClipboardCheck },
   { to: "/automations", label: "Automations", icon: Zap },
   { to: "/knowledge", label: "Knowledge", icon: BookOpen },
   { to: "/roadmap", label: "Roadmap", icon: Map },
