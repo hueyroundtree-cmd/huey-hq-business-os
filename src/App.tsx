@@ -29,6 +29,7 @@ import OperationsTimeline from "./pages/OperationsTimeline";
 import SystemHealth from "./pages/SystemHealth";
 import CommandSearch from "./pages/CommandSearch";
 import Progress from "./pages/Progress";
+import AgentDesk from "./pages/AgentDesk";
 
 const queryClient = new QueryClient();
 
@@ -58,6 +59,7 @@ const App = () => (
               <Route path="/content" element={<Content />} />
               <Route path="/scripts" element={<Scripts />} />
               <Route path="/executive" element={<Executive />} />
+              <Route path="/agent-desk" element={<AgentDesk />} />
               <Route path="/automations" element={<Automations />} />
               <Route path="/knowledge" element={<Knowledge />} />
               <Route path="/roadmap" element={<Roadmap />} />
