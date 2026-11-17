@@ -8,6 +8,8 @@ import {
 } from "@/lib/dashboard";
 import { NOTION_ENTITIES } from "@/lib/notionEntities";
 
+const HEALTH_NOW = new Date("2026-07-01T18:00:00.000Z");
+
 const mapping = (
   entity: NotionMappingHealth["entity"],
   overrides: Partial<NotionMappingHealth> = {},
@@ -23,7 +25,7 @@ const mapping = (
 describe("CEO Dashboard Notion health", () => {
   it("reports Verified Live only when every area has live verification", () => {
     const mappings = NOTION_ENTITIES.map((entity) => mapping(entity.key));
-    expect(getNotionHealth(mappings)).toMatchObject({
+    expect(getNotionHealth(mappings, HEALTH_NOW)).toMatchObject({
       status: "Verified Live",
       connectedCount: 10,
     });
@@ -32,7 +34,7 @@ describe("CEO Dashboard Notion health", () => {
   it("does not treat a placeholder status as a connection", () => {
     const mappings = NOTION_ENTITIES.map((entity) => mapping(entity.key));
     mappings[4] = mapping(mappings[4].entity, { verified_at: null });
-    expect(getNotionHealth(mappings)).toMatchObject({
+    expect(getNotionHealth(mappings, HEALTH_NOW)).toMatchObject({
       status: "Needs Setup",
       connectedCount: 9,
     });
@@ -40,7 +42,7 @@ describe("CEO Dashboard Notion health", () => {
 
   it("surfaces a mapping error above partial connection state", () => {
     const mappings = [mapping("tasks", { status: "Error", last_error: "Unauthorized" })];
-    expect(getNotionHealth(mappings).status).toBe("Error");
+    expect(getNotionHealth(mappings, HEALTH_NOW).status).toBe("Error");
   });
 });
 

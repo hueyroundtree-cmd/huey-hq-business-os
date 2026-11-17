@@ -263,15 +263,17 @@ export default function Dashboard() {
   const notionStatus = notionHealth.status;
   const lastNotionSync = notionHealth.lastSync;
   const connectedNotionAreas = notionHealth.connectedCount;
+  const staleNotionAreas = notionHealth.staleCount;
 
   const recs = useMemo(() => {
     const list: { title: string; detail: string; to: string }[] = [];
-    if (followUpsDue > 0) list.push({ title: `${followUpsDue} follow-up${followUpsDue > 1 ? "s" : ""} overdue`, detail: "Open the CRM to work them.", to: "/crm" });
+    if (followUpsDue > 0) list.push({ title: `${followUpsDue} follow-up${followUpsDue > 1 ? "s" : ""} overdue`, detail: "Products can stay in procurement; work the five warmest leads today.", to: "/crm" });
+    if (staleNotionAreas > 0) list.push({ title: `${staleNotionAreas} Notion connection${staleNotionAreas === 1 ? " is" : "s are"} stale`, detail: "The app has not received fresh Notion proof in over 24 hours.", to: "/integrations/notion" });
     if (billsDueTotal > 0) list.push({ title: `${money(billsDueTotal)} in bills due`, detail: "Mark paid once you clear them.", to: "/settings" });
     if (contentDue > 0) list.push({ title: `${contentDue} content item${contentDue > 1 ? "s" : ""} in progress`, detail: "Move something to Posted today.", to: "/content" });
     if (integrations.length === 0) list.push({ title: "Connect a source of truth", detail: "Start with Notion to sync CRM + revenue.", to: "/integrations" });
     return list;
-  }, [followUpsDue, billsDueTotal, contentDue, integrations]);
+  }, [followUpsDue, billsDueTotal, contentDue, integrations, staleNotionAreas]);
 
   const missionControl = useMemo(() => {
     const hour = new Date().getHours();
