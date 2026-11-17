@@ -15,6 +15,13 @@ import { relTime } from "@/lib/format";
 const STATUSES = ["Not Connected","Active","Paused","Error"] as const;
 type Auto = { id: string; agent_name: string; owner: string | null; trigger: string | null; platform: string | null; last_run_at: string | null; next_run_at: string | null; status: typeof STATUSES[number]; proof: string | null };
 
+const REQUIRED_SYSTEMS = [
+  { name: "Daily Notion refresh", owner: "Operations", trigger: "Daily · Pacific time", status: "Needs Setup" },
+  { name: "Lead follow-up reminders", owner: "Sales", trigger: "Manual review before outreach", status: "Manual Only" },
+  { name: "Revenue proof check", owner: "Finance", trigger: "After revenue is logged", status: "Manual Only" },
+  { name: "Morning operating briefing", owner: "CEO", trigger: "Start My Day", status: "Manual Only" },
+];
+
 export default function Automations() {
   const [rows, setRows] = useState<Auto[]>([]);
   const [open, setOpen] = useState(false);
@@ -40,8 +47,24 @@ export default function Automations() {
     <div>
       <PageHeader title="Automation Monitor" description="Register the agents you rely on. Runs must be proven, never fabricated."
         actions={<Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" />Register</Button>} />
-      <div className="p-4 md:p-6">
-        {rows.length === 0 ? <EmptyState icon={Zap} title="No automations registered" description="Add the agents, Zapier flows, and cron jobs you actually depend on." action={<Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" />Register</Button>} />
+      <div className="p-4 md:p-6 space-y-4">
+        {rows.length === 0 && (
+          <div className="surface border-gold/40 bg-gold/10 p-4">
+            <div className="font-medium">Automation registry recovered</div>
+            <p className="mt-1 text-sm text-muted-foreground">These required systems are visible now, but none are labeled live without current run proof.</p>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {REQUIRED_SYSTEMS.map((system) => (
+                <div key={system.name} className="rounded-md border border-border bg-background/60 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div><div className="text-sm font-medium">{system.name}</div><div className="text-xs text-muted-foreground">{system.owner} · {system.trigger}</div></div>
+                    <ConnectionBadge status={system.status as "Needs Setup" | "Manual Only"} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {rows.length === 0 ? <EmptyState icon={Zap} title="No live automations registered" description="Register a workflow only after its owner, trigger, permissions and run proof are known." action={<Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1.5" />Register</Button>} />
           : (
             <div className="surface overflow-hidden">
               <table className="w-full text-sm">

@@ -9,12 +9,28 @@ export type NotionMappingHealth = {
   verified_at: string | null;
 };
 
-export function getNotionHealth(mappings: NotionMappingHealth[]) {
+export const NOTION_SYNC_FRESHNESS_MS = 24 * 60 * 60 * 1000;
+
+export function getNotionHealth(
+  mappings: NotionMappingHealth[],
+  now = new Date(),
+) {
+  const isFresh = (value: string | null) =>
+    Boolean(value) && now.getTime() - new Date(value as string).getTime() <= NOTION_SYNC_FRESHNESS_MS;
   const connected = mappings.filter(
-    (mapping) => mapping.status === "Verified Live" && Boolean(mapping.verified_at),
+    (mapping) =>
+      mapping.status === "Verified Live" &&
+      Boolean(mapping.verified_at) &&
+      isFresh(mapping.last_sync_at),
+  );
+  const stale = mappings.filter(
+    (mapping) =>
+      mapping.status === "Verified Live" &&
+      Boolean(mapping.verified_at) &&
+      !isFresh(mapping.last_sync_at),
   );
   const status: ConnectionState =
-    mappings.some((mapping) => mapping.status === "Error")
+    mappings.some((mapping) => mapping.status === "Error") || stale.length > 0
       ? "Error"
       : mappings.length === NOTION_ENTITIES.length &&
           connected.length === NOTION_ENTITIES.length
@@ -27,7 +43,7 @@ export function getNotionHealth(mappings: NotionMappingHealth[]) {
       .sort()
       .at(-1) ?? null;
 
-  return { status, connectedCount: connected.length, lastSync };
+  return { status, connectedCount: connected.length, staleCount: stale.length, lastSync };
 }
 
 export function getDailyDriverScore(topTaskStates: boolean[], actionStates: boolean[]) {
